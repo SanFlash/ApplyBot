@@ -92,3 +92,15 @@ def test_manual_job_import_from_user_assisted_source(tmp_path, monkeypatch):
     jobs = client.get("/api/jobs").json
     assert jobs[0]["source"] == "user-assisted"
     assert jobs[0]["status"] == "ready"
+
+
+def test_add_feed_sqlite(tmp_path, monkeypatch):
+    client = setup_db(tmp_path, monkeypatch)
+    r = client.post("/api/feeds", json={
+        "name": "Example Jobs",
+        "url": "https://example.com/jobs.xml",
+        "source_type": "rss",
+    })
+    assert r.status_code == 200
+    feeds = client.get("/api/feeds").json
+    assert feeds[0]["enabled"] in (1, True)
