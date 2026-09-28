@@ -881,6 +881,32 @@ def upload_resume():
     return jsonify({"ok": True, "message": "Resume uploaded for this ApplyBot instance."})
 
 
+@app.get("/api/provider-check")
+def provider_check():
+    """Non-mutating smoke test for Jobicy public API and DB schema."""
+    result = {"service": "ApplyBot", "provider": "Jobicy Public REST API", "database": "postgres" if is_postgres() else "sqlite"}
+    try:
+        data = fetch_json(JOBICY_API_URL, {"count": 5, "tag": "qa"}, headers={}, timeout=JOBICY_TIMEOUT)
+        jobs = normalize_jobicy_jobs(data)
+        result["jobicy"] = {"ok": True, "count": len(jobs), "sample_titles": [j["title"] for j in jobs[:5]]}
+    except Exception as exc:
+        result["jobicy"] = {"ok": False, "error": str(exc)[:1000]}
+    try:
+        c = db()
+        if c.pg:
+            rows = c.execute("SELECT column_name FROM information_schema.columns WHERE table_name=%s", ("jobs",)).fetchall()
+            columns = {r["column_name"] for r in rows}
+        else:
+            rows = c.execute("PRAGMA table_info(jobs)").fetchall()
+            columns = {r[1] for r in rows}
+        c.close()
+        required = {"source_url", "match_reasons", "matched_skills"}
+        result["database_schema"] = {"ok": required.issubset(columns), "missing": sorted(required - columns)}
+    except Exception as exc:
+        result["database_schema"] = {"ok": False, "error": str(exc)[:1000]}
+    result["ok"] = bool(result.get("jobicy", {}).get("ok") and result.get("database_schema", {}).get("ok"))
+    return jsonify(result), (200 if result["ok"] else 503)
+
 @app.get("/api/config")
 def config_status():
     return jsonify({
