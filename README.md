@@ -1,76 +1,69 @@
 # ApplyBot
 
-ApplyBot is an in-app job discovery, matching, application generation and supported-ATS auto-application system. LinkedIn Jobs is the primary discovery source through a managed third-party data API; ApplyBot never asks for a LinkedIn password or session cookie.
+ApplyBot is an in-app job discovery, matching, application preparation and supported-ATS auto-application system. The default discovery layer is **Jobicy's free public Jobs REST API**; no Jobicy API key is required for the public endpoint.
 
 The workflow is:
 
 ```
 Search inside ApplyBot
       ↓
-Fetch job listings
+Jobicy public REST API
       ↓
-Show SOURCE + URL + job details
+Normalize + deduplicate live listings
       ↓
-ApplyBot scoring
+Role / skill / location / experience / salary scoring
       ↓
-Threshold + salary + experience filters
-      ↓
-Qualified queue
+Threshold-qualified queue
       ↓
 Generate truthful application answers
+      ↓
+Resolve employer application link when exposed
       ↓
 Detect supported ATS
       ↓
 Fill public application form
       ↓
-Submit when the form is unambiguous
+Submit only when the form is unambiguous
       ↓
-Record submitted / failed / requires-user-action
+Record evidence/status
 ```
 
-## What it shows
+## Jobicy discovery
 
-For every discovered job the dashboard shows:
+ApplyBot calls:
+
+`GET https://jobicy.com/api/v2/remote-jobs`
+
+The public endpoint requires **no API key**, supports up to 200 listings per request, and accepts `count`, `geo`, `industry` and `tag` filters. Jobicy recommends using its taxonomy endpoints when storing production filter slugs and not polling more often than once per hour. citeturn0search0turn0search1
+
+ApplyBot uses the user's desired role as the `tag` and maps common country/remote inputs to Jobicy's `geo` filter. Jobicy is a remote-job source, so a request such as "India" means listings whose Jobicy geography is India or explicitly Anywhere/Remote; it does **not** guarantee an office-based Indore/Bengaluru/Pune listing.
+
+For every result the dashboard records:
 
 - Job title
 - Company
-- Location
-- Work mode
-- Source that supplied the listing
-- Original job URL
+- Jobicy listing URL
+- Geography
 - Match percentage
 - Match/rejection reasons
 - Matched skills
 - Salary when available
 - Detected application adapter
-- Final application status
+- Application outcome
 
-Primary discovery source:
+Jobicy's fair-use rules permit using its listings in applications and user experiences, require keeping Jobicy as the original source, and prohibit abusive/high-frequency polling. citeturn0search3
 
-- **LinkedIn Jobs via Apify** — ApplyBot sends the desired LinkedIn search URL to a maintained Apify LinkedIn Jobs actor and receives structured job records. The selected actor supports public LinkedIn job-search URLs, result limits and programmatic API execution. urlApify LinkedIn Jobs Scraper APIhttps://apify.com/curious_coder/linkedin-jobs-scraper/api/openapi
-- Legacy sources (Adzuna, Greenhouse, Lever, Remotive and Arbeitnow) are **disabled by default** so broad unrelated listings do not pollute a LinkedIn-focused search. They can be explicitly enabled with `ENABLE_LEGACY_SOURCES=true`.
+## Free-first configuration
 
-`APIFY_API_TOKEN` is required for live LinkedIn discovery. `APIFY_LINKEDIN_ACTOR` defaults to `curious_coder~linkedin-jobs-search-scraper`.
+No Jobicy API key is needed for normal discovery:
 
-Discovery flow:
-
-```text
-User query + location
-       ↓
-Apify LinkedIn Jobs API
-       ↓
-Normalize LinkedIn records
-       ↓
-Location / remote filtering
-       ↓
-ApplyBot role + skill + experience + salary scoring
-       ↓
-Threshold-qualified queue
-       ↓
-Supported ATS application
+```env
+JOBICY_API_URL=https://jobicy.com/api/v2/remote-jobs
+JOBICY_COUNT=200
+ENABLE_LEGACY_SOURCES=false
 ```
 
-ApplyBot does **not** claim to call a public official LinkedIn Job Search API. A managed data provider is used as the LinkedIn data layer instead. The selected Apify actor exposes a programmatic API and supports LinkedIn search inputs. citeturn10view0turn8search3
+Legacy providers remain available only when explicitly enabled. This keeps unrelated sources from polluting a focused search.
 
 ## Matching
 
