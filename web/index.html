@@ -124,12 +124,12 @@ async function discover(auto){
  $('status').textContent='Found '+x.items_seen+' listings from '+x.sources_checked.join(', ')+' · '+x.qualified_jobs+' qualified at '+x.threshold+'%+.';
  await loadJobs();
  if(auto){
-  const candidates=(x.results||[]).filter(j=>Number(j.score||0)>=x.threshold && j.job_id).slice(0,Number(val('maxApply')||3));
+  const candidates=(x.results||[]).filter(j=>j.qualified && j.job_id).slice(0,Number(val('maxApply')||3));
   if(!candidates.length){$('status').textContent+=' No qualified jobs were sent to the application step.';return}
   $('status').textContent+=' Starting '+candidates.length+' automatic application(s)...';
   let submitted=0, action=0;
   for(const j of candidates){
-   const rr=await fetch('/api/jobs/'+j.job_id+'/auto-apply',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({threshold:x.threshold})});
+   const rr=await fetch('/api/jobs/'+j.job_id+'/auto-apply',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({threshold:x.threshold,max_experience:Number(val('maxExp')||2),min_salary:Number(val('minSalary')||3)})});
    const z=await rr.json();
    if(z.submitted)submitted++; else if(['requires_user_action','requires_configuration'].includes(z.status))action++;
   }
@@ -140,7 +140,7 @@ async function discover(auto){
 async function applyJob(id){
  const threshold=Number(val('threshold')||70);
  $('status').textContent='Applying to the selected qualified job...';
- const r=await fetch('/api/jobs/'+id+'/auto-apply',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({threshold})});
+ const r=await fetch('/api/jobs/'+id+'/auto-apply',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({threshold,max_experience:Number(val('maxExp')||2),min_salary:Number(val('minSalary')||3)})});
  const x=await r.json();
  $('status').textContent=x.message||x.error||x.status;
  await loadAll();
