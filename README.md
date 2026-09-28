@@ -53,13 +53,25 @@ For every result the dashboard records:
 
 Jobicy's fair-use rules permit using its listings in applications and user experiences, require keeping Jobicy as the original source, and prohibit abusive/high-frequency polling. citeturn0search3
 
+
+### Real application links
+
+The free Jobicy API returns a Jobicy listing URL. Jobicy documents that the original employer/ATS URL is returned when a valid Commercial Jobs API Bearer key is supplied; that commercial service can charge for direct application URLs. ApplyBot therefore has two honest modes:
+
+- **Free mode:** discovers and scores live Jobicy listings. If the Jobicy page exposes an external application link, ApplyBot can resolve it and attempt supported browser submission.
+- **Commercial-key mode:** sends the Jobicy Bearer key server-side and uses the returned direct ATS URL when available. This is the preferred path for reliable automatic application routing.
+
+ApplyBot never treats a Jobicy listing page as if it were an employer application form. It also stops on CAPTCHA, login, ambiguous required questions, unsupported ATS flows, or missing candidate configuration instead of claiming a submission happened.
+
 ## Free-first configuration
 
 No Jobicy API key is needed for normal discovery:
 
 ```env
 JOBICY_API_URL=https://jobicy.com/api/v2/remote-jobs
+JOBICY_API_KEY=
 JOBICY_COUNT=200
+JOBICY_TIMEOUT=30
 ENABLE_LEGACY_SOURCES=false
 ```
 
@@ -131,7 +143,7 @@ For production, use a persistent disk or external private storage if the resume 
 
 ## Render deployment
 
-The repository includes `render.yaml`.
+The repository includes `render.yaml`. Set `JOBICY_API_KEY` only in Render Environment Variables if you have purchased/enabled Jobicy commercial direct-URL access; never commit the key.
 
 Build:
 
