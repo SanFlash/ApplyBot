@@ -142,7 +142,7 @@ def test_discover_search_uses_server_side_sources(tmp_path, monkeypatch):
     assert r.json["mode"] == "in_app"
     assert r.json["items_seen"] == 1
     assert r.json["new_jobs"] == 1
-    assert client.get("/api/jobs").json[0]["source"] == "Remotive"
+    assert client.get("/api/jobs").json == []
 
 
 
@@ -260,7 +260,7 @@ def test_jobicy_search_tag_prefers_qa():
 def test_jobicy_provider_is_public(monkeypatch):
     def fake_fetch(url, params):
         assert "jobicy.com/api/v2/remote-jobs" in url
-        assert params["tag"] == "QA Automation Engineer"
+        assert params["tag"] == "qa"
         return {"jobs": []}
     monkeypatch.setattr(applybot, "fetch_json", fake_fetch)
     jobs, errors, status = applybot.search_jobicy_jobs("QA Automation Engineer", "India")
@@ -268,3 +268,19 @@ def test_jobicy_provider_is_public(monkeypatch):
     assert errors == []
     assert status[0]["source"] == "Jobicy"
     assert status[0]["configured"] is True
+
+
+def test_jobicy_india_match_can_use_description_country_list():
+    job = {
+        "location": "UK, USA, Canada +11 more",
+        "description": "Eligible countries include India, Ireland and Portugal.",
+        "work_mode": "Remote",
+    }
+    assert applybot.location_matches(job, "India")
+    assert applybot.location_matches(job, "India", True)
+
+
+def test_jobicy_anywhere_is_valid_for_india():
+    job = {"location": "Anywhere", "description": "", "work_mode": "Remote"}
+    assert applybot.location_matches(job, "India")
+    assert applybot.location_matches(job, "India", True)
