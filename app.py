@@ -592,10 +592,139 @@ def manual_job():
     return jsonify({"imported": len(result), "results": result})
 
 
+def detect_application_adapter(url):
+    host = (urlparse(url).hostname or "").lower()
+    if "greenhouse.io" in host:
+        return "greenhouse"
+    if "lever.co" in host:
+        return "lever"
+    return "unsupported"
+
+
+def _fill_first(page, selectors, value):
+    if not value:
+        return False
+    for selector in selectors:
+        try:
+            loc = page.locator(selector).first
+            if loc.count() and loc.is_visible():
+                loc.fill(value)
+                return True
+        except Exception:
+            pass
+    return False
+
+
+def _fill_label(page, patterns, value):
+    if not value:
+        return False
+    for pattern in patterns:
+        try:
+            loc = page.get_by_label(re.compile(pattern, re.I)).first
+            if loc.count() and loc.is_visible():
+                loc.fill(value)
+                return True
+        except Exception:
+            pass
+    return False
+
+
+def submit_with_browser(job, answers):
+    adapter = detect_application_adapter(job["url"])
+    if adapter == "unsupported":
+        return {"status": "unsupported", "adapter": adapter,
+                "message": "No supported public ATS application adapter for this URL."}
+    if not CANDIDATE_EMAIL or not CANDIDATE_PHONE or not RESUME_PATH:
+        return {"status": "requires_configuration", "adapter": adapter,
+                "message": "Configure CANDIDATE_EMAIL, CANDIDATE_PHONE and RESUME_PATH."}
+    if not Path(RESUME_PATH).is_file():
+        return {"status": "requires_configuration", "adapter": adapter,
+                "message": "Configured resume file does not exist."}
+
+    try:
+        from playwright.sync_api import sync_playwright
+    except ImportError:
+        return {"status": "requires_configuration", "adapter": adapter,
+                "message": "Playwright is not installed."}
+
+    try:
+        with sync_playwright() as p:
+            browser = p.chromium.launch(headless=True)
+            page = browser.new_page()
+            page.goto(job["url"], wait_until="domcontentloaded", timeout=45000)
+            page.wait_for_timeout(1500)
+            body_text = page.locator("body").inner_text(timeout=10000)
+            challenge = page.locator(
+                'iframe[src*="recaptcha"], iframe[src*="hcaptcha"], [id*="captcha"], [class*="captcha"]'
+            )
+            if challenge.count() or re.search(
+                r"\b(captcha|verify you are human|cloudflare challenge)\b", body_text, re.I
+            ):
+                browser.close()
+                return {"status": "requires_user_action", "adapter": adapter,
+                        "message": "CAPTCHA/human verification detected; submission stopped without bypassing it."}
+
+            first, last = CANDIDATE["name"].split(" ", 1)[0], CANDIDATE["name"].split(" ")[-1]
+            _fill_first(page, ['input[name*="first" i]', 'input[id*="first" i]'], first)
+            _fill_first(page, ['input[name*="last" i]', 'input[id*="last" i]'], last)
+            _fill_first(page, ['input[type="email"]', 'input[name*="email" i]'], CANDIDATE_EMAIL)
+            _fill_first(page, ['input[type="tel"]', 'input[name*="phone" i]', 'input[id*="phone" i]'], CANDIDATE_PHONE)
+
+            files = page.locator('input[type="file"]')
+            if files.count():
+                files.first.set_input_files(RESUME_PATH)
+
+            cover = answers.get("cover_letter", "")
+            _fill_label(page, [r"cover letter", r"additional information", r"message"], cover)
+            _fill_first(page, ['textarea[name*="cover" i]', 'textarea[id*="cover" i]'], cover)
+
+            for patterns, value in [
+                ([r"why.*interested", r"why.*want"], answers.get("why_interested")),
+                ([r"automation.*experience", r"experience.*automation"], answers.get("automation_experience")),
+                ([r"playwright"], answers.get("playwright_experience")),
+                ([r"salary", r"compensation"], answers.get("expected_salary")),
+                ([r"notice", r"join"], answers.get("join")),
+                ([r"relocat"], answers.get("relocation")),
+                ([r"authorized", r"work authorization"], answers.get("authorized_india")),
+            ]:
+                _fill_label(page, patterns, value)
+
+            required = page.locator("input[required], textarea[required], select[required]")
+            missing = []
+            for i in range(required.count()):
+                el = required.nth(i)
+                try:
+                    if el.is_visible() and not el.input_value():
+                        missing.append(el.evaluate("(e) => e.tagName.toLowerCase()"))
+                except Exception:
+                    pass
+            if missing:
+                browser.close()
+                return {"status": "requires_user_action", "adapter": adapter,
+                        "message": f"{len(missing)} required field(s) remain unanswered; ApplyBot will not guess."}
+
+            submit = page.get_by_role("button", name=re.compile(r"submit application|submit|apply", re.I)).last
+            if not submit.count():
+                submit = page.locator('input[type="submit"], button[type="submit"]').last
+            if not submit.count() or not submit.is_visible():
+                browser.close()
+                return {"status": "requires_user_action", "adapter": adapter,
+                        "message": "No unambiguous submit control was found."}
+
+            submit.click()
+            page.wait_for_timeout(2500)
+            confirmation = page.locator("body").inner_text(timeout=10000)
+            browser.close()
+            if re.search(r"(application.*(submitted|received)|thank you.*apply|successfully applied)", confirmation, re.I):
+                return {"status": "submitted", "adapter": adapter,
+                        "message": "Application submitted and confirmation text was detected."}
+            return {"status": "submitted", "adapter": adapter,
+                    "message": "Submit action completed; no standard confirmation phrase was detected."}
+    except Exception as exc:
+        return {"status": "failed", "adapter": adapter, "message": str(exc)[:1000]}
+
+
 def auto_apply_job(job_id, threshold=70):
-    # This endpoint performs the qualification/application-preparation step.
-    # Actual third-party submission requires a supported, authorized application
-    # adapter and must never bypass login, CAPTCHA, or anti-bot controls.
     c = db()
     r = c.execute("SELECT * FROM jobs WHERE id=?", (job_id,)).fetchone()
     if not r:
@@ -608,33 +737,76 @@ def auto_apply_job(job_id, threshold=70):
         return {"ok": False, "status": "below_threshold", "score": score, "threshold": threshold}
 
     answers = make_answers(job)
+    answers["cover_letter"] = (
+        "Dear Hiring Team,\n\n"
+        + "I am excited to apply for the " + job["title"] + " position at " + job["company"] + ". "
+        + "I bring hands-on QA experience across manual testing, web automation, mobile automation, API validation, "
+        + "SQL/database testing and end-to-end quality assurance. My automation work includes Playwright, "
+        + "JavaScript/TypeScript, Page Object Model and Appium.\n\nRegards,\nSatyendra Kumar Namdeo"
+    )
+
+    if AUTO_APPLY_ENABLED:
+        result = submit_with_browser(job, answers)
+    else:
+        result = {
+            "status": "application_ready",
+            "adapter": detect_application_adapter(job["url"]),
+            "message": "Auto-apply is disabled; application data was prepared but not submitted."
+        }
+
     now = utcnow()
-    summary = answers["why_hire"]
-    cover = ""
+    status = result["status"]
+    if status == "submitted":
+        stored_status, submitted_at = "applied", now
+    elif status in {"requires_user_action", "requires_configuration", "failed", "unsupported"}:
+        stored_status, submitted_at = status, None
+    else:
+        stored_status, submitted_at = "approved", None
+
     if c.pg:
         cur = c.execute(
-            "INSERT INTO applications(job_id,tailored_summary,cover_letter,answers_json,status,created_at,updated_at) "
-            "VALUES(?,?,?,?,?,?,?) RETURNING id",
-            (job_id, summary, cover, json.dumps(answers), "approved", now, now),
+            """INSERT INTO applications(
+                job_id,tailored_summary,cover_letter,answers_json,status,adapter,
+                submission_id,submission_message,submitted_at,created_at,updated_at
+            ) VALUES(?,?,?,?,?,?,?,?,?,?,?) RETURNING id""",
+            (
+                job_id, answers["why_hire"], answers["cover_letter"], json.dumps(answers),
+                stored_status, result.get("adapter"), result.get("submission_id"),
+                result.get("message"), submitted_at, now, now
+            ),
         )
         aid = cur.fetchone()["id"]
     else:
         cur = c.execute(
-            "INSERT INTO applications(job_id,tailored_summary,cover_letter,answers_json,status,created_at,updated_at) VALUES(?,?,?,?,?,?,?)",
-            (job_id, summary, cover, json.dumps(answers), "approved", now, now),
+            """INSERT INTO applications(
+                job_id,tailored_summary,cover_letter,answers_json,status,adapter,
+                submission_id,submission_message,submitted_at,created_at,updated_at
+            ) VALUES(?,?,?,?,?,?,?,?,?,?,?)""",
+            (
+                job_id, answers["why_hire"], answers["cover_letter"], json.dumps(answers),
+                stored_status, result.get("adapter"), result.get("submission_id"),
+                result.get("message"), submitted_at, now, now
+            ),
         )
         aid = cur.lastrowid
-    c.execute("UPDATE jobs SET status=? WHERE id=?", ("application_ready", job_id))
+
+    job_status = "applied" if status == "submitted" else (
+        "application_ready" if status == "application_ready" else status
+    )
+    c.execute("UPDATE jobs SET status=? WHERE id=?", (job_status, job_id))
     c.commit()
     c.close()
     return {
-        "ok": True,
-        "status": "application_ready",
+        "ok": status not in {"failed", "below_threshold"},
+        "status": status,
         "application_id": aid,
         "job_id": job_id,
         "job_url": job["url"],
-        "submitted": False,
-        "message": "Job qualified and application data prepared. No third-party submission was claimed."
+        "source": job["source"],
+        "score": score,
+        "adapter": result.get("adapter"),
+        "message": result.get("message"),
+        "submitted": status == "submitted",
     }
 
 @app.post("/api/jobs/<int:job_id>/prepare")
