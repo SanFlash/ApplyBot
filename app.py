@@ -234,12 +234,26 @@ def score_job(j):
     reasons, matched = [], []
     role_hit = False
 
+    requested = (j.get("_query") or "").strip().lower()
+    requested_tokens = tokens(requested)
+    title_tokens = tokens(title)
+    query_overlap = len(requested_tokens & title_tokens) if requested_tokens else 0
+
     for role, keywords in ROLE_KEYWORDS.items():
         if any(k in title for k in keywords):
             role_hit = True
-            score += 30 if role in CANDIDATE["roles_primary"] else 15
+            score += 36 if role in CANDIDATE["roles_primary"] else 18
             reasons.append(f"Role matches {role}")
             break
+
+    if not role_hit and requested_tokens:
+        overlap_ratio = query_overlap / max(1, len(requested_tokens))
+        role_words = {"qa", "quality", "assurance", "automation", "automated", "tester", "testing", "test", "sdet", "software"}
+        title_role_overlap = len(title_tokens & role_words)
+        if overlap_ratio >= 0.5 and title_role_overlap >= 2:
+            role_hit = True
+            score += 30
+            reasons.append("Title closely matches requested role")
 
     if not role_hit:
         return 0, ["Role does not match configured targets"], []
@@ -566,6 +580,7 @@ def search_public_sources(query, location="", remote=False):
         if key in seen:
             continue
         seen.add(key)
+        job["_query"] = query
         filtered.append(job)
 
     return filtered, errors, source_status
