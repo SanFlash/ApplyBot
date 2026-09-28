@@ -20,6 +20,16 @@ services:
         sync: false
       - key: CANDIDATE_PHONE
         sync: false
+      - key: JOBICY_API_URL
+        value: "https://jobicy.com/api/v2/remote-jobs"
+      - key: JOBICY_API_KEY
+        sync: false
+      - key: JOBICY_COUNT
+        value: "200"
+      - key: JOBICY_TIMEOUT
+        value: "30"
+      - key: ENABLE_LEGACY_SOURCES
+        value: "false"
       - key: ADZUNA_APP_ID
         sync: false
       - key: ADZUNA_APP_KEY
