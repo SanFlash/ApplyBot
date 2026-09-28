@@ -438,9 +438,10 @@ def add_feed():
         return jsonify({"error": "feed URL must be http(s)"}), 400
     c = db()
     try:
+        enabled_value = True if c.pg else 1
         c.execute(
             "INSERT INTO feed_sources(name,url,source_type,enabled,created_at) VALUES(?,?,?,?,?)",
-            (body["name"], body["url"], body.get("source_type", "rss"), 1, utcnow()),
+            (body["name"], body["url"], body.get("source_type", "rss"), enabled_value, utcnow()),
         )
         c.commit()
     except Exception as exc:
