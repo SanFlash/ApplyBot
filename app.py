@@ -671,7 +671,7 @@ def submit_with_browser(job, answers):
     if adapter == "unsupported":
         return {"status": "unsupported", "adapter": adapter,
                 "message": "Auto-apply requires the stored job URL to be a direct supported Greenhouse or Lever application page."}
-    if not CANDIDATE_EMAIL or not CANDIDATE_PHONE or not RESUME_PATH:
+    if not CANDIDATE_EMAIL or not CANDIDATE_PHONE:
         return {"status": "requires_configuration", "adapter": adapter,
                 "message": "Configure CANDIDATE_EMAIL, CANDIDATE_PHONE and RESUME_PATH."}
     if not resume_file_path().is_file():
