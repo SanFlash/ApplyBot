@@ -1215,6 +1215,10 @@ def application_status(application_id):
     return jsonify({"ok": True, "status": status})
 
 
+# Gunicorn imports this module instead of executing __main__. Initialize and
+# migrate the production database during application import so existing Render/
+# Supabase PostgreSQL schemas receive all required columns before requests arrive.
+init_db()
+
 if __name__ == "__main__":
-    init_db()
     app.run(host="0.0.0.0", port=int(os.getenv("PORT", "8000")), debug=os.getenv("DEBUG", "false").lower() == "true")
