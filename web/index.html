@@ -18,7 +18,7 @@ button.secondary{background:#202d47;color:#dce8ff}.pill{padding:5px 8px;border-r
 .tabs{display:flex;gap:8px;flex-wrap:wrap;margin:15px 0}.tab{background:#1a2740;color:#cfe0fb}.tab.active{background:#76a9ff;color:#071021}
 .pre{white-space:pre-wrap;background:#0a1120;border:1px solid var(--line);padding:14px;border-radius:10px}.actions{display:flex;justify-content:flex-end;gap:8px;margin-top:15px}
 input,textarea{width:100%;padding:11px;border-radius:10px;border:1px solid var(--line);background:#0a1120;color:var(--text);outline:none}
-textarea{min-height:130px;resize:vertical}.searchbox{margin-top:16px;padding:16px;border:1px solid var(--line);border-radius:14px;background:#0b1324}.searchrow,.feedrow{display:grid;grid-template-columns:1.5fr 1fr auto;gap:8px}.searchactions{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}.hint{font-size:12px;color:var(--muted);margin-top:9px}.check{display:flex;align-items:center;gap:7px;padding:0 10px;color:#cfe0fb;font-size:13px;white-space:nowrap}.check input{width:auto}.divider{height:1px;background:var(--line);margin:18px 0}.subhead{font-weight:700;margin-bottom:8px}.manualgrid{display:grid;grid-template-columns:1fr 1fr;gap:8px}.manualgrid textarea{grid-column:1/-1}
+textarea{min-height:130px;resize:vertical}.searchbox{margin-top:16px;padding:16px;border:1px solid var(--line);border-radius:14px;background:#0b1324}.searchrow,.feedrow{display:grid;grid-template-columns:1.5fr 1fr auto;gap:8px}.searchactions{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}.hint{font-size:12px;color:var(--muted);margin-top:9px}.check{display:flex;align-items:center;gap:7px;padding:0 10px;color:#cfe0fb;font-size:13px;white-space:nowrap}.check input{width:auto}.divider{height:1px;background:var(--line);margin:18px 0}.subhead{font-weight:700;margin-bottom:8px}.feedexamples{margin-top:10px;padding:10px 12px;border:1px dashed var(--line);border-radius:10px;font-size:12px;line-height:1.8}.feedexamples code{color:#bfe0ff}.manualgrid{display:grid;grid-template-columns:1fr 1fr;gap:8px}.manualgrid textarea{grid-column:1/-1}
 @media(max-width:900px){.grid{grid-template-columns:repeat(2,1fr)}.job{grid-template-columns:1fr 1fr}.job button{grid-column:1/-1;width:100%}.searchrow,.feedrow{grid-template-columns:1fr 1fr}.check{padding:8px 0}.manualgrid{grid-template-columns:1fr}.manualgrid textarea{grid-column:auto}}
 @media(max-width:560px){.grid{grid-template-columns:1fr}.wrap{padding:20px 4vw}header{padding:18px 4vw}.brand{font-size:18px}.modalbox{padding:18px}}
 </style>
@@ -51,10 +51,17 @@ textarea{min-height:130px;resize:vertical}.searchbox{margin-top:16px;padding:16p
 </div>
 <div class="divider"></div>
 <div class="subhead">Authorized RSS / Atom feed</div>
+<div class="hint">A feed must return RSS or Atom XML containing job entries. Do not paste a normal LinkedIn Jobs page URL here.</div>
 <div class="feedrow">
-<input id="feedName" placeholder="Feed name">
+<input id="feedName" placeholder="Feed name, e.g. Company Jobs">
 <input id="feedUrl" placeholder="https://company.example/jobs/feed.xml">
 <button class="secondary" onclick="addFeed()">Add feed</button>
+</div>
+<div class="feedexamples">
+<b>Example feed URL formats</b>
+<div><code>https://example.com/jobs/feed.xml</code></div>
+<div><code>https://example.com/careers/rss</code></div>
+<div class="hint">If the URL opens a normal HTML webpage instead of XML/RSS/Atom, it is not a valid feed for this field.</div>
 </div>
 <div id="feedStatus" class="muted" style="margin-top:10px"></div>
 <div class="divider"></div>
