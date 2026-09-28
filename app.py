@@ -109,7 +109,7 @@ def init_db():
     c = db()
     statements = [
         """CREATE TABLE IF NOT EXISTS jobs (
-          id INTEGER PRIMARY KEY%s, external_id TEXT UNIQUE NOT NULL, source TEXT NOT NULL,
+          id %s, external_id TEXT UNIQUE NOT NULL, source TEXT NOT NULL,
           title TEXT NOT NULL, company TEXT NOT NULL, location TEXT, work_mode TEXT,
           salary_min REAL, salary_max REAL, experience_min REAL, url TEXT NOT NULL, description TEXT NOT NULL,
           discovered_at TEXT NOT NULL, match_score REAL DEFAULT 0, status TEXT DEFAULT 'new', skip_reason TEXT)"""
