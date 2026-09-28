@@ -24,8 +24,8 @@ CANDIDATE_PHONE = os.getenv("CANDIDATE_PHONE", "").strip()
 RESUME_PATH = os.getenv("RESUME_PATH", "").strip()
 ADZUNA_APP_ID = os.getenv("ADZUNA_APP_ID", "").strip()
 ADZUNA_APP_KEY = os.getenv("ADZUNA_APP_KEY", "").strip()
-APIFY_API_TOKEN = os.getenv("APIFY_API_TOKEN", "").strip()
-APIFY_LINKEDIN_ACTOR = os.getenv("APIFY_LINKEDIN_ACTOR", "curious_coder~linkedin-jobs-search-scraper").strip()
+JOBICY_API_URL = os.getenv("JOBICY_API_URL", "https://jobicy.com/api/v2/remote-jobs").strip()
+JOBICY_COUNT = min(200, max(1, int(os.getenv("JOBICY_COUNT", "200"))))
 ENABLE_LEGACY_SOURCES = os.getenv("ENABLE_LEGACY_SOURCES", "false").lower() == "true"
 GREENHOUSE_BOARDS = [x.strip() for x in os.getenv("GREENHOUSE_BOARDS", "").split(",") if x.strip()]
 LEVER_COMPANIES = [x.strip() for x in os.getenv("LEVER_COMPANIES", "").split(",") if x.strip()]
@@ -439,31 +439,90 @@ def normalize_linkedin_jobs(data):
     return jobs
 
 
-def search_linkedin_jobs(query, location="", remote=False):
-    if not APIFY_API_TOKEN:
-        return [], [{"source": "LinkedIn", "error": "APIFY_API_TOKEN is not configured"}], [{"source": "LinkedIn", "found": 0, "configured": False, "provider": "Apify"}]
-    from urllib.parse import quote_plus
-    search_url = "https://www.linkedin.com/jobs/search/?keywords=" + quote_plus(query)
-    if location:
-        search_url += "&location=" + quote_plus(location)
-    payload = {
-        "urls": [search_url],
-        "count": 50,
-        "scrapeCompany": False,
-        "autoConvertToAiSearch": True,
+def normalize_jobicy_jobs(data):
+    jobs = []
+    rows = data.get("jobs", []) if isinstance(data, dict) else []
+    for raw in rows:
+        if not isinstance(raw, dict):
+            continue
+        title = str(raw.get("jobTitle") or "").strip()
+        company = str(raw.get("companyName") or "Unknown").strip()
+        url = str(raw.get("url") or "").strip()
+        if not title or not company or not url:
+            continue
+        description = strip_html(raw.get("jobDescription") or raw.get("jobExcerpt") or "")
+        salary_min, salary_max = raw.get("salaryMin"), raw.get("salaryMax")
+        try:
+            salary_min = float(salary_min) if salary_min is not None else None
+            salary_max = float(salary_max) if salary_max is not None else None
+        except (TypeError, ValueError):
+            salary_min, salary_max = None, None
+        currency = str(raw.get("salaryCurrency") or "").upper()
+        if currency != "INR":
+            salary_min = salary_max = None
+        if salary_min is not None:
+            salary_min /= 100000
+        if salary_max is not None:
+            salary_max /= 100000
+        location = str(raw.get("jobGeo") or "Anywhere").strip()
+        jobs.append({
+            "external_id": "jobicy:" + str(raw.get("id") or raw.get("jobSlug") or url),
+            "source": "Jobicy",
+            "source_url": url,
+            "title": title,
+            "company": company,
+            "location": location,
+            "work_mode": "Remote",
+            "salary_min": salary_min,
+            "salary_max": salary_max,
+            "experience_min": extract_experience(description),
+            "url": url,
+            "description": description or title,
+            "employment_type": ", ".join(str(x) for x in (raw.get("jobType") or [])),
+            "posted_at": str(raw.get("pubDate") or "").strip(),
+        })
+    return jobs
+
+
+def _jobicy_geo(location):
+    value = (location or "").strip().lower()
+    if not value:
+        return ""
+    if "remote" in value or value in {"anywhere", "worldwide", "global"}:
+        return "anywhere"
+    country_map = {
+        "india": "india", "united states": "usa", "usa": "usa", "us": "usa",
+        "united kingdom": "uk", "uk": "uk", "canada": "canada",
+        "australia": "australia", "europe": "europe", "asia": "asia", "apac": "apac",
     }
-    endpoint = "https://api.apify.com/v2/acts/" + APIFY_LINKEDIN_ACTOR + "/run-sync-get-dataset-items?token=" + quote_plus(APIFY_API_TOKEN)
+    for name, slug in country_map.items():
+        if name in value:
+            return slug
+    return ""
+
+
+def search_jobicy_jobs(query, location="", remote=False):
+    params = {"count": JOBICY_COUNT, "tag": query.strip() or "QA Automation Engineer"}
+    geo = _jobicy_geo(location)
+    if remote:
+        params["geo"] = "anywhere"
+    elif geo:
+        params["geo"] = geo
     try:
-        data = post_json(endpoint, payload, timeout=120)
-        rows = normalize_linkedin_jobs(data)
+        data = fetch_json(JOBICY_API_URL, params)
+        rows = normalize_jobicy_jobs(data)
         filtered = []
+        location_value = (location or "").lower()
         for job in rows:
-            if location_matches(job, location, remote):
-                job["_query"] = query
-                filtered.append(job)
-        return filtered, [], [{"source": "LinkedIn", "found": len(filtered), "configured": True, "provider": "Apify"}]
+            hay = (job.get("location") or "").lower()
+            if location_value and not remote:
+                if location_value not in hay and "anywhere" not in hay and "remote" not in hay:
+                    continue
+            job["_query"] = query
+            filtered.append(job)
+        return filtered, [], [{"source": "Jobicy", "found": len(filtered), "configured": True, "provider": "Jobicy Public REST API"}]
     except Exception as exc:
-        return [], [{"source": "LinkedIn", "error": str(exc)[:1000]}], [{"source": "LinkedIn", "found": 0, "configured": True, "provider": "Apify"}]
+        return [], [{"source": "Jobicy", "error": str(exc)[:1000]}], [{"source": "Jobicy", "found": 0, "configured": True, "provider": "Jobicy Public REST API"}]
 
 
 def normalize_remotive_jobs(data):
@@ -596,8 +655,7 @@ def location_matches(job, location, remote=False):
 
 def search_public_sources(query, location="", remote=False):
     query = (query or "").strip() or "QA Automation Engineer"
-    results, errors, source_status = search_linkedin_jobs(query, location, remote)
-
+    results, errors, source_status = search_jobicy_jobs(query, location, remote)
     if ENABLE_LEGACY_SOURCES:
         if ADZUNA_APP_ID and ADZUNA_APP_KEY:
             try:
@@ -605,8 +663,7 @@ def search_public_sources(query, location="", remote=False):
                     "app_id": ADZUNA_APP_ID, "app_key": ADZUNA_APP_KEY, "results_per_page": "50",
                     "what": query, "where": location or "India", "content-type": "application/json", "sort_by": "date",
                 })
-                rows = normalize_adzuna_jobs(data)
-                results.extend(rows)
+                rows = normalize_adzuna_jobs(data); results.extend(rows)
                 source_status.append({"source": "Adzuna", "found": len(rows), "configured": True})
             except Exception as exc:
                 errors.append({"source": "Adzuna", "error": str(exc)})
@@ -616,23 +673,17 @@ def search_public_sources(query, location="", remote=False):
         for board in GREENHOUSE_BOARDS:
             try:
                 rows = normalize_greenhouse_jobs(fetch_json(f"https://boards-api.greenhouse.io/v1/boards/{board}/jobs", {"content": "true"}), board)
-                results.extend(rows)
-                source_status.append({"source": "Greenhouse:" + board, "found": len(rows), "configured": True})
-            except Exception as exc:
-                errors.append({"source": "Greenhouse:" + board, "error": str(exc)})
+                results.extend(rows); source_status.append({"source": "Greenhouse:" + board, "found": len(rows), "configured": True})
+            except Exception as exc: errors.append({"source": "Greenhouse:" + board, "error": str(exc)})
         for company in LEVER_COMPANIES:
             try:
                 rows = normalize_lever_jobs(fetch_json(f"https://api.lever.co/v0/postings/{company}", {"mode": "json"}), company)
-                results.extend(rows)
-                source_status.append({"source": "Lever:" + company, "found": len(rows), "configured": True})
-            except Exception as exc:
-                errors.append({"source": "Lever:" + company, "error": str(exc)})
+                results.extend(rows); source_status.append({"source": "Lever:" + company, "found": len(rows), "configured": True})
+            except Exception as exc: errors.append({"source": "Lever:" + company, "error": str(exc)})
         try:
             rows = normalize_remotive_jobs(fetch_json("https://remotive.com/api/remote-jobs", {"search": query, "limit": "50"}))
-            results.extend(rows)
-            source_status.append({"source": "Remotive", "found": len(rows), "configured": True})
-        except Exception as exc:
-            errors.append({"source": "Remotive", "error": str(exc)})
+            results.extend(rows); source_status.append({"source": "Remotive", "found": len(rows), "configured": True})
+        except Exception as exc: errors.append({"source": "Remotive", "error": str(exc)})
         try:
             arbeit = normalize_arbeitnow_jobs(fetch_json("https://www.arbeitnow.com/api/job-board-api"))
             q_tokens = tokens(query)
@@ -641,21 +692,14 @@ def search_public_sources(query, location="", remote=False):
                 if not q_tokens or sum(1 for token in q_tokens if token in haystack) >= max(1, min(3, len(q_tokens))):
                     results.append(job)
             source_status.append({"source": "Arbeitnow", "found": len(arbeit), "configured": True})
-        except Exception as exc:
-            errors.append({"source": "Arbeitnow", "error": str(exc)})
-
+        except Exception as exc: errors.append({"source": "Arbeitnow", "error": str(exc)})
     filtered, seen = [], set()
     for job in results:
-        if not job.get("title") or not job.get("company") or not job.get("url"):
-            continue
-        if location and not location_matches(job, location, remote):
-            continue
+        if not job.get("title") or not job.get("company") or not job.get("url"): continue
+        if location and job.get("source") != "Jobicy" and not location_matches(job, location, remote): continue
         key = job.get("external_id") or job_fingerprint(job)
-        if key in seen:
-            continue
-        seen.add(key)
-        job["_query"] = query
-        filtered.append(job)
+        if key in seen: continue
+        seen.add(key); job["_query"] = query; filtered.append(job)
     return filtered, errors, source_status
 
 def import_job_items(items):
@@ -789,8 +833,8 @@ def config_status():
         "resume_configured": resume_file_path().is_file(),
         "supported_browser_adapters": ["greenhouse", "lever"],
         "discovery_sources": {
-            "LinkedIn": bool(APIFY_API_TOKEN),
-            "LinkedIn_provider": "Apify (" + APIFY_LINKEDIN_ACTOR + ")",
+            "Jobicy": True,
+            "Jobicy_provider": "Jobicy Public REST API",
             "legacy_sources_enabled": ENABLE_LEGACY_SOURCES,
             "Adzuna": bool(ADZUNA_APP_ID and ADZUNA_APP_KEY),
             "Greenhouse": len(GREENHOUSE_BOARDS),
@@ -876,14 +920,50 @@ def _fill_label(page, patterns, value):
     return False
 
 
+def resolve_jobicy_application_url(job_url):
+    if not job_url or "jobicy.com" not in (urlparse(job_url).hostname or "").lower():
+        return job_url, None
+    try:
+        from playwright.sync_api import sync_playwright
+        with sync_playwright() as p:
+            browser = p.chromium.launch(headless=True)
+            page = browser.new_page()
+            page.goto(job_url, wait_until="domcontentloaded", timeout=30000)
+            page.wait_for_timeout(800)
+            links = page.locator("a[href]")
+            for i in range(links.count()):
+                a = links.nth(i)
+                try:
+                    href = a.get_attribute("href") or ""
+                    label = (a.inner_text() or "").strip().lower()
+                    host = (urlparse(href).hostname or "").lower()
+                    if href.startswith("http") and "jobicy.com" not in host and re.search(r"\b(apply|application|apply now|career|careers)\b", label, re.I):
+                        browser.close()
+                        return href, "Resolved external employer application URL from Jobicy"
+                except Exception:
+                    continue
+            browser.close()
+    except Exception as exc:
+        return job_url, "Jobicy application-link resolution failed: " + str(exc)[:400]
+    return job_url, "Jobicy listing did not expose a supported external application URL"
+
+
 def submit_with_browser(job, answers):
-    adapter = detect_application_adapter(job["url"])
+    application_url = job["url"]
+    resolution_message = None
+    if job.get("source") == "Jobicy":
+        application_url, resolution_message = resolve_jobicy_application_url(job["url"])
+        if application_url != job["url"]:
+            job = {**job, "url": application_url}
+    adapter = detect_application_adapter(application_url)
     if job.get("source") == "Remotive":
         return {"status": "unsupported_source_policy", "adapter": adapter,
                 "message": "Remotive public API terms do not permit submitting its listings to third-party sites. This listing can be reviewed, but ApplyBot will not auto-submit it."}
     if adapter == "unsupported":
-        return {"status": "unsupported", "adapter": adapter,
-                "message": "Auto-apply requires the stored job URL to be a direct supported Greenhouse or Lever application page."}
+        message = "No supported Greenhouse or Lever employer application URL was found."
+        if resolution_message:
+            message += " " + resolution_message + "."
+        return {"status": "unsupported", "adapter": adapter, "message": message}
     if not CANDIDATE_EMAIL or not CANDIDATE_PHONE:
         return {"status": "requires_configuration", "adapter": adapter,
                 "message": "Configure CANDIDATE_EMAIL, CANDIDATE_PHONE and RESUME_PATH."}
@@ -972,3 +1052,80 @@ def submit_with_browser(job, answers):
                     "message": "Submit action completed; no standard confirmation phrase was detected."}
     except Exception as exc:
         return {"status": "failed", "adapter": adapter, "message": str(exc)[:1000]}
+
+
+
+def auto_apply_job(job_id, threshold=70, max_experience=2, min_salary=3):
+    c = db()
+    row = c.execute("SELECT * FROM jobs WHERE id=?", (job_id,)).fetchone()
+    c.close()
+    if not row:
+        return {"status": "not_found", "submitted": False, "message": "Job was not found."}
+    job = dict(row)
+    score = float(job.get("match_score") or 0)
+    if score < float(threshold):
+        return {"status": "below_threshold", "submitted": False, "message": f"Match score {score:.0f}% is below the {float(threshold):.0f}% threshold."}
+    exp = job.get("experience_min")
+    if exp is not None and float(exp) > float(max_experience):
+        return {"status": "experience_exceeds_limit", "submitted": False, "message": f"Required experience {float(exp):g}+ years exceeds the configured limit."}
+    salary = job.get("salary_max")
+    if salary is not None and float(salary) < float(min_salary):
+        return {"status": "salary_below_minimum", "submitted": False, "message": "Published salary is below the configured minimum."}
+    if not AUTO_APPLY_ENABLED:
+        return {"status": "application_ready", "submitted": False, "message": "Qualified, but automatic submission is disabled."}
+    result = submit_with_browser(job, make_answers(job))
+    status = result.get("status", "failed")
+    now = utcnow()
+    c = db()
+    c.execute(
+        """INSERT INTO applications(job_id,tailored_summary,cover_letter,answers_json,status,created_at,updated_at,adapter,submission_id,submission_message,submitted_at)
+        VALUES(?,?,?,?,?,?,?,?,?,?,?)""",
+        (job_id, job["title"], make_answers(job).get("why_interested", ""), json.dumps(make_answers(job)),
+         "applied" if status == "submitted" else status, now, now, result.get("adapter"),
+         result.get("submission_id"), result.get("message"), now if status == "submitted" else None)
+    )
+    if status == "submitted":
+        c.execute("UPDATE jobs SET status=? WHERE id=?", ("applied", job_id))
+    c.commit()
+    app_row = c.execute("SELECT id FROM applications WHERE job_id=? ORDER BY id DESC LIMIT 1", (job_id,)).fetchone()
+    c.close()
+    return {"status": "applied" if status == "submitted" else status, "submitted": status == "submitted",
+            "application_id": app_row["id"] if app_row else None, "adapter": result.get("adapter"), "message": result.get("message")}
+
+
+@app.post("/api/jobs/<int:job_id>/auto-apply")
+def auto_apply(job_id):
+    body = request.get_json(silent=True) or {}
+    try:
+        threshold = float(body.get("threshold", 70))
+        max_experience = float(body.get("max_experience", 2))
+        min_salary = max(float(body.get("min_salary", 3)), CANDIDATE["minimum_ctc_lpa"])
+    except (TypeError, ValueError):
+        return jsonify({"error": "Invalid threshold, experience or salary value."}), 400
+    return jsonify(auto_apply_job(job_id, threshold, max_experience, min_salary))
+
+
+@app.get("/api/applications")
+def applications():
+    c = db()
+    rows = c.execute("SELECT a.*, j.title, j.company FROM applications a JOIN jobs j ON j.id=a.job_id ORDER BY a.id DESC").fetchall()
+    c.close()
+    return jsonify([dict(r) for r in rows])
+
+
+@app.post("/api/applications/<int:application_id>/status")
+def application_status(application_id):
+    body = request.get_json(silent=True) or {}
+    status = str(body.get("status") or "").strip()
+    allowed = {"draft","application_ready","requires_user_action","requires_configuration","failed","applied","rejected","interview","offer","closed"}
+    if status not in allowed:
+        return jsonify({"error": "Invalid application status."}), 400
+    c = db()
+    c.execute("UPDATE applications SET status=?,updated_at=? WHERE id=?", (status, utcnow(), application_id))
+    c.commit(); c.close()
+    return jsonify({"ok": True, "status": status})
+
+
+if __name__ == "__main__":
+    init_db()
+    app.run(host="0.0.0.0", port=int(os.getenv("PORT", "8000")), debug=os.getenv("DEBUG", "false").lower() == "true")
