@@ -253,6 +253,10 @@ def test_normalize_jobicy_job():
     assert jobs[0]["source_url"].startswith("https://jobicy.com/")
 
 
+def test_jobicy_search_tag_prefers_qa():
+    assert applybot._jobicy_search_tag("QA Automation Engineer") == "qa"
+
+
 def test_jobicy_provider_is_public(monkeypatch):
     def fake_fetch(url, params):
         assert "jobicy.com/api/v2/remote-jobs" in url
