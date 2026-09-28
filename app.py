@@ -17,6 +17,11 @@ DATA = BASE / "data"
 DATA.mkdir(exist_ok=True)
 SQLITE_DB = DATA / "applybot.db"
 DATABASE_URL = os.getenv("DATABASE_URL", "").strip()
+AUTO_APPLY_ENABLED = os.getenv("AUTO_APPLY_ENABLED", "false").lower() == "true"
+AUTO_APPLY_MAX = max(1, int(os.getenv("AUTO_APPLY_MAX", "3")))
+CANDIDATE_EMAIL = os.getenv("CANDIDATE_EMAIL", "").strip()
+CANDIDATE_PHONE = os.getenv("CANDIDATE_PHONE", "").strip()
+RESUME_PATH = os.getenv("RESUME_PATH", "").strip()
 
 app = Flask(__name__, static_folder="web", static_url_path="")
 
@@ -106,6 +111,34 @@ def db():
     return DB()
 
 
+def ensure_schema_columns(c):
+    migrations = {
+        "applications": {
+            "adapter": "TEXT",
+            "submission_id": "TEXT",
+            "submission_message": "TEXT",
+            "submitted_at": "TEXT",
+        },
+        "jobs": {
+            "match_reasons": "TEXT",
+            "matched_skills": "TEXT",
+        },
+    }
+    for table, wanted in migrations.items():
+        if c.pg:
+            rows = c.execute(
+                "SELECT column_name FROM information_schema.columns WHERE table_name=?",
+                (table,),
+            ).fetchall()
+            existing = {r["column_name"] for r in rows}
+        else:
+            rows = c.execute("PRAGMA table_info(" + table + ")").fetchall()
+            existing = {r[1] for r in rows}
+        for name, kind in wanted.items():
+            if name not in existing:
+                c.execute("ALTER TABLE " + table + " ADD COLUMN " + name + " " + kind)
+
+
 def init_db():
     c = db()
 
@@ -143,6 +176,8 @@ def init_db():
 
     for statement in statements:
         c.execute(statement)
+
+    ensure_schema_columns(c)
 
     candidate_json = json.dumps(CANDIDATE)
     if c.pg:
@@ -435,11 +470,11 @@ def import_job_items(items):
         try:
             c.execute(
                 """INSERT INTO jobs(external_id,source,title,company,location,work_mode,salary_min,salary_max,
-                experience_min,url,description,discovered_at,match_score,status,skip_reason)
-                VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                experience_min,url,description,discovered_at,match_score,status,skip_reason,match_reasons,matched_skills)
+                VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                 (ext, j.get("source", "manual"), j["title"], j["company"], j.get("location", ""),
                  j.get("work_mode", ""), smin, smax, exp, j["url"], j["description"], utcnow(), sc, status,
-                 "; ".join(reasons)),
+                 "; ".join(reasons), json.dumps(reasons), json.dumps(matched)),
             )
             inserted = c.execute("SELECT id FROM jobs WHERE external_id=?", (ext,)).fetchone()
             created.append({"job_id": inserted["id"] if inserted else None, "external_id": ext, "score": sc, "status": status, "matched_skills": matched, "reasons": reasons})
