@@ -11,6 +11,8 @@ ApplyBot is designed to reduce repetitive job-search work without fabricating ca
 - Persistent jobs, applications, settings, and feed-source tables.
 - RSS/Atom feed ingestion from permitted job sources.
 - Configurable feed registry.
+- LinkedIn-assisted job search links (no scraping or session cookies).
+- User-assisted job import for jobs found on LinkedIn or other authorized sources.
 - Duplicate protection using stable external IDs.
 - Job fingerprinting support.
 - Salary and experience extraction from descriptions.
@@ -57,33 +59,39 @@ Unpaid internships are excluded.
 ## Architecture
 
 ```
-Permitted Job Feed / ATS
-        |
-        v
-  Feed Discovery API
-        |
-        v
- Salary + Experience Extraction
-        |
-        v
- Candidate Match Engine
-        |
-        +------> Skip / record reason
-        |
-        v
-   Application Queue
-        |
-        v
- Tailored Application Draft
-        |
-        v
- Human Review
-        |
-        v
- Application Tracking
-        |
-        v
- PostgreSQL / Supabase
+Authorized Feed / ATS       LinkedIn Search (user initiated)
+        |                              |
+        v                              v
+   Feed Discovery API          User selects a job
+        |                              |
+        +--------------+---------------+
+                       v
+                 Job Analysis
+                       |
+                       v
+          Salary + Experience Extraction
+                       |
+                       v
+              Candidate Match Engine
+                       |
+             +---------+---------+
+             |                   |
+          Skip/reason        Ready match
+                                 |
+                                 v
+                       Application Queue
+                                 |
+                                 v
+                     Tailored Application Draft
+                                 |
+                                 v
+                           Human Review
+                                 |
+                                 v
+                     Application Tracking
+                                 |
+                                 v
+                       PostgreSQL / Supabase
 ```
 
 ## Repository structure
@@ -217,11 +225,65 @@ Example:
 
 If salary or experience is omitted, ApplyBot attempts to extract them from the job description.
 
-## Feed discovery
+## Job discovery
 
-ApplyBot can ingest RSS/Atom feeds from permitted sources.
+ApplyBot now supports **three practical discovery paths**.
 
-### Add a feed
+### 1. LinkedIn-assisted search
+
+The dashboard's **Search LinkedIn** button builds a normal LinkedIn Jobs search URL from your criteria:
+
+- Role / keywords
+- Location
+- Remote preference
+
+Example:
+
+```
+QA Automation Engineer + India + Remote
+```
+
+ApplyBot opens the search in your browser. You select the jobs you want to evaluate.
+
+**Important:** ApplyBot does not log in to LinkedIn, collect passwords, collect session cookies, bypass CAPTCHA, scrape LinkedIn pages, or automate activity intended to evade LinkedIn controls.
+
+### 2. Analyze a LinkedIn job you selected
+
+After opening LinkedIn:
+
+1. Open a job you are authorized to view.
+2. Copy the job URL.
+3. Copy the job description/details available to you.
+4. Paste the title, company, location, job URL and description into **Analyze a job you found**.
+5. Click **Analyze & add job**.
+6. ApplyBot extracts experience/salary where possible.
+7. The matching engine scores the job against your profile.
+8. If suitable, use **Prepare application**.
+9. Review the generated application before submitting it on the original platform.
+
+API:
+
+```http
+POST /api/jobs/manual
+Content-Type: application/json
+```
+
+Example:
+
+```json
+{
+  "title": "QA Automation Engineer",
+  "company": "Example Corp",
+  "location": "Bangalore",
+  "work_mode": "Hybrid",
+  "url": "https://www.linkedin.com/jobs/view/example",
+  "description": "Playwright, Python, API testing, 1+ years..."
+}
+```
+
+### 3. Authorized RSS/Atom feeds
+
+For sources that provide a permitted RSS/Atom feed:
 
 ```http
 POST /api/feeds
@@ -236,13 +298,7 @@ Content-Type: application/json
 }
 ```
 
-### List feeds
-
-```http
-GET /api/feeds
-```
-
-### Discover jobs
+Then:
 
 ```http
 POST /api/discover
@@ -252,13 +308,25 @@ The discovery endpoint:
 
 1. Loads enabled feeds.
 2. Downloads RSS/Atom XML.
-3. Extracts title, URL and description.
+3. Extracts job data.
 4. Runs the candidate matching engine.
 5. Stores suitable and skipped jobs.
 6. Ignores duplicate external IDs.
 7. Returns source errors without discarding successful sources.
 
 Only use feeds and sources you are permitted to access.
+
+### Search-link API
+
+```http
+GET /api/search-links?query=QA%20Automation%20Engineer&location=India&remote=true
+```
+
+Returns:
+
+- `linkedin` — normal LinkedIn Jobs search URL.
+- `google_linkedin` — Google search constrained toward LinkedIn job pages.
+- `note` — the security boundary for the workflow.
 
 ## Matching rules
 
@@ -456,6 +524,49 @@ Do not commit:
 - browser session cookies
 - private tokens
 
+## Recommended real-world workflow
+
+For your current job search, use this sequence:
+
+```
+1. Enter role + location
+        ↓
+2. Search LinkedIn
+        ↓
+3. Open a suitable job
+        ↓
+4. Paste job details into ApplyBot
+        ↓
+5. ApplyBot scores the job
+        ↓
+6. Prepare application
+        ↓
+7. Review summary / cover letter / answers
+        ↓
+8. Open the original job URL
+        ↓
+9. Submit manually
+        ↓
+10. Track application status in ApplyBot
+```
+
+This gives you the repetitive analysis and application-preparation benefits without making the system dependent on unauthorized LinkedIn automation.
+
+## API summary
+
+| Endpoint | Purpose |
+|---|---|
+| `GET /api/search-links` | Generate user-initiated job search links |
+| `POST /api/jobs/manual` | Analyze and store a job selected by the user |
+| `POST /api/jobs/import` | Import structured jobs |
+| `GET /api/jobs` | List scored jobs |
+| `POST /api/jobs/{id}/prepare` | Generate application draft |
+| `GET /api/applications` | Track applications |
+| `POST /api/applications/{id}/status` | Update application status |
+| `POST /api/feeds` | Add authorized RSS/Atom feed |
+| `POST /api/discover` | Discover jobs from feeds |
+| `GET /api/health` | Health/database status |
+
 ## Roadmap
 
 ### Stage 1 — Foundation
@@ -475,8 +586,9 @@ Do not commit:
 - Production database boundary
 
 ### Stage 3 — Next
-- Scheduled discovery worker
+- Scheduled discovery worker for permitted feeds
 - More authorized job-source connectors
+- Browser-assisted handoff workflows that keep final submission human-controlled
 - Better semantic job matching
 - AI-powered JD analysis
 - Resume tailoring
