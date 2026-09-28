@@ -36,7 +36,7 @@ ApplyBot calls:
 
 The public endpoint requires **no API key**, supports up to 200 listings per request, and accepts `count`, `geo`, `industry` and `tag` filters. Jobicy recommends using its taxonomy endpoints when storing production filter slugs and not polling more often than once per hour. citeturn0search0turn0search1
 
-ApplyBot uses the user's desired role as the `tag` and maps common country/remote inputs to Jobicy's `geo` filter. Jobicy currently exposes regional/country slugs such as APAC, USA, Europe and others; it does not expose a dedicated India slug in its current location taxonomy. Therefore an India search uses **APAC coverage** and does not guarantee an India-only result. City searches such as Indore/Bengaluru/Pune are not guaranteed by this provider.
+ApplyBot uses a strong keyword anchor (for example `qa` for QA Automation Engineer) in Jobicy's `tag` filter, then performs the exact role/skill/experience/location scoring locally. This avoids treating a multi-word role phrase as an exact Jobicy search. Jobicy currently exposes regional/country slugs such as APAC, USA, Europe and others; it does not expose a dedicated India slug in its current location taxonomy. Therefore an India search uses **APAC coverage** and does not guarantee an India-only result. City searches such as Indore/Bengaluru/Pune are not guaranteed by this provider.
 
 For every result the dashboard records:
 
