@@ -230,29 +230,37 @@ def test_auto_apply_prepares_when_disabled(tmp_path, monkeypatch):
     assert r.json["status"] == "application_ready"
     assert r.json["submitted"] is False
 
-def test_normalize_linkedin_job():
-    jobs = applybot.normalize_linkedin_jobs({
-        "data": [{
-            "job_id": "123",
-            "job_title": "QA Automation Engineer",
-            "company_name": "Example",
-            "location": "Bengaluru, India",
-            "job_description": "1 year experience with Playwright, Python and API testing. Salary 4-6 LPA.",
-            "job_url": "https://www.linkedin.com/jobs/view/123",
-            "posted_date": "2026-09-28",
+def test_normalize_jobicy_job():
+    jobs = applybot.normalize_jobicy_jobs({
+        "jobs": [{
+            "id": 123,
+            "jobTitle": "QA Automation Engineer",
+            "companyName": "Example",
+            "jobGeo": "India",
+            "jobDescription": "<p>1 year experience with Playwright and Python.</p>",
+            "url": "https://jobicy.com/jobs/example",
+            "salaryMin": 400000,
+            "salaryMax": 600000,
+            "salaryCurrency": "INR",
+            "jobType": ["full-time"],
         }]
     })
-    assert jobs[0]["source"] == "LinkedIn"
+    assert jobs[0]["source"] == "Jobicy"
     assert jobs[0]["title"] == "QA Automation Engineer"
     assert jobs[0]["salary_min"] == 4
     assert jobs[0]["salary_max"] == 6
     assert jobs[0]["experience_min"] == 1
-    assert jobs[0]["source_url"].startswith("https://www.linkedin.com/")
+    assert jobs[0]["source_url"].startswith("https://jobicy.com/")
 
 
-def test_linkedin_provider_requires_configuration(monkeypatch):
-    monkeypatch.setattr(applybot, "APIFY_API_TOKEN", "")
-    jobs, errors, status = applybot.search_linkedin_jobs("QA Automation Engineer", "India")
+def test_jobicy_provider_is_public(monkeypatch):
+    def fake_fetch(url, params):
+        assert "jobicy.com/api/v2/remote-jobs" in url
+        assert params["tag"] == "QA Automation Engineer"
+        return {"jobs": []}
+    monkeypatch.setattr(applybot, "fetch_json", fake_fetch)
+    jobs, errors, status = applybot.search_jobicy_jobs("QA Automation Engineer", "India")
     assert jobs == []
-    assert errors and "not configured" in errors[0]["error"]
-    assert status[0]["configured"] is False
+    assert errors == []
+    assert status[0]["source"] == "Jobicy"
+    assert status[0]["configured"] is True
