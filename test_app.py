@@ -163,7 +163,7 @@ def test_discover_search_uses_threshold_and_returns_job_ids(tmp_path, monkeypatc
             "experience_min": 1,
             "url": "https://example.com/jobs/999",
             "description": "Playwright Python API testing",
-        }], [])
+        }], [], [{"source": "test-api", "found": 1, "configured": true}])
 
     monkeypatch.setattr(applybot, "search_public_sources", fake_search)
     r = client.post("/api/discover/search", json={
