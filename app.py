@@ -477,10 +477,496 @@ def normalize_jobicy_jobs(data):
             salary_max /= 100000
         location = str(raw.get("jobGeo") or "Anywhere").strip()
         job_level = str(raw.get("jobLevel") or "").strip()
+        job_id = raw.get("id")
+        jobicy_url = f"https://jobicy.com/jobs/{job_id}" if job_id else url
         jobs.append({
             "external_id": "jobicy:" + str(raw.get("id") or raw.get("jobSlug") or url),
             "source": "Jobicy",
-            "source_url": url,
+from __future__ import annotations
+
+import hashlib
+import json
+import os
+import re
+import sqlite3
+import urllib.request
+from datetime import datetime, timezone
+from pathlib import Path
+from urllib.parse import urlparse
+
+from flask import Flask, jsonify, request, send_from_directory
+
+BASE = Path(__file__).resolve().parent
+DATA = BASE / "data"
+DATA.mkdir(exist_ok=True)
+SQLITE_DB = DATA / "applybot.db"
+DATABASE_URL = os.getenv("DATABASE_URL", "").strip()
+AUTO_APPLY_ENABLED = os.getenv("AUTO_APPLY_ENABLED", "false").lower() == "true"
+AUTO_APPLY_MAX = max(1, int(os.getenv("AUTO_APPLY_MAX", "3")))
+CANDIDATE_EMAIL = os.getenv("CANDIDATE_EMAIL", "").strip()
+CANDIDATE_PHONE = os.getenv("CANDIDATE_PHONE", "").strip()
+RESUME_PATH = os.getenv("RESUME_PATH", "").strip()
+ADZUNA_APP_ID = os.getenv("ADZUNA_APP_ID", "").strip()
+ADZUNA_APP_KEY = os.getenv("ADZUNA_APP_KEY", "").strip()
+JOBICY_API_URL = os.getenv("JOBICY_API_URL", "https://jobicy.com/api/v2/remote-jobs").strip()
+JOBICY_API_KEY = os.getenv("JOBICY_API_KEY", "").strip()
+JOBICY_COUNT = min(200, max(1, int(os.getenv("JOBICY_COUNT", "200"))))
+JOBICY_TIMEOUT = max(10, int(os.getenv("JOBICY_TIMEOUT", "30")))
+ENABLE_LEGACY_SOURCES = os.getenv("ENABLE_LEGACY_SOURCES", "false").lower() == "true"
+GREENHOUSE_BOARDS = [x.strip() for x in os.getenv("GREENHOUSE_BOARDS", "").split(",") if x.strip()]
+LEVER_COMPANIES = [x.strip() for x in os.getenv("LEVER_COMPANIES", "").split(",") if x.strip()]
+
+def resume_file_path():
+    configured = RESUME_PATH or str(DATA / "resume.pdf")
+    return Path(configured)
+
+app = Flask(__name__, static_folder="web", static_url_path="")
+
+CANDIDATE = {
+    "name": "Satyendra Kumar Namdeo",
+    "title": "QA Engineer | QA Automation | SDET | AI-Assisted QA",
+    "experience_years": 1.0,
+    "current_ctc_lpa": 2.2,
+    "expected_ctc_min_lpa": 4.0,
+    "expected_ctc_max_lpa": 5.0,
+    "minimum_ctc_lpa": 3.0,
+    "notice_period_days": 45,
+    "locations": ["India", "Indore", "Bangalore", "Pune", "Remote"],
+    "work_modes": ["Hybrid"],
+    "roles_primary": [
+        "QA Automation Engineer", "Automation Tester", "SDET",
+        "Software Tester", "Test Engineer", "AI Assisted QA", "AI Assisted Tester"
+    ],
+    "roles_secondary": ["Frontend Designer", "AI-Assisted Developer", "Vibe Coding"],
+    "skills": [
+        "Python", "Playwright", "JavaScript", "TypeScript", "Appium", "Git",
+        "GitHub", "Jira", "Swagger", "SQL", "CI/CD", "Confluence",
+        "API Testing", "Manual Testing", "Regression Testing", "E2E Testing",
+        "AI-Assisted Testing", "Prompt Engineering"
+    ],
+}
+
+ROLE_KEYWORDS = {
+    "QA Automation Engineer": ["qa automation", "automation qa", "automation engineer", "quality assurance automation"],
+    "Automation Tester": ["automation tester", "test automation", "qa automation"],
+    "SDET": ["sdet", "software development engineer in test"],
+    "Software Tester": ["software tester", "qa tester", "test engineer", "qa analyst", "quality analyst"],
+    "Test Engineer": ["test engineer", "quality engineer"],
+    "AI Assisted QA": ["ai assisted qa", "ai qa", "ai testing", "ai-assisted testing"],
+    "AI Assisted Tester": ["ai tester", "ai-assisted tester"],
+    "Frontend Designer": ["frontend designer", "ui designer", "frontend"],
+    "AI-Assisted Developer": ["ai-assisted developer", "ai developer"],
+    "Vibe Coding": ["vibe coding", "ai coding"],
+}
+
+STOPWORDS = {
+    "and", "the", "with", "for", "from", "that", "this", "your", "you",
+    "are", "will", "our", "their", "have", "has", "into", "years", "year",
+    "role", "job", "using", "work", "about", "who", "what", "but", "not", "all"
+}
+
+
+def utcnow():
+    return datetime.now(timezone.utc).isoformat()
+
+
+def is_postgres():
+    return bool(DATABASE_URL and DATABASE_URL.startswith(("postgres://", "postgresql://")))
+
+
+class DB:
+    def __init__(self):
+        self.pg = is_postgres()
+        if self.pg:
+            try:
+                import psycopg2
+                from psycopg2.extras import RealDictCursor
+            except ImportError as exc:
+                raise RuntimeError("DATABASE_URL is set but psycopg2-binary is not installed") from exc
+            self.conn = psycopg2.connect(DATABASE_URL)
+            self.cursor_factory = RealDictCursor
+        else:
+            self.conn = sqlite3.connect(SQLITE_DB)
+            self.conn.row_factory = sqlite3.Row
+
+    def execute(self, sql, params=()):
+        if self.pg:
+            sql = sql.replace("?", "%s")
+            cur = self.conn.cursor(cursor_factory=self.cursor_factory)
+            cur.execute(sql, params)
+            return cur
+        return self.conn.execute(sql, params)
+
+    def commit(self):
+        self.conn.commit()
+
+    def close(self):
+        self.conn.close()
+
+
+def db():
+    return DB()
+
+
+def ensure_schema_columns(c):
+    migrations = {
+        "applications": {
+            "adapter": "TEXT",
+            "submission_id": "TEXT",
+            "submission_message": "TEXT",
+            "submitted_at": "TEXT",
+        },
+        "jobs": {
+            "match_reasons": "TEXT",
+            "matched_skills": "TEXT",
+            "source_url": "TEXT",
+        },
+    }
+    for table, wanted in migrations.items():
+        if c.pg:
+            rows = c.execute(
+                "SELECT column_name FROM information_schema.columns WHERE table_name=?",
+                (table,),
+            ).fetchall()
+            existing = {r["column_name"] for r in rows}
+        else:
+            rows = c.execute("PRAGMA table_info(" + table + ")").fetchall()
+            existing = {r[1] for r in rows}
+        for name, kind in wanted.items():
+            if name not in existing:
+                c.execute("ALTER TABLE " + table + " ADD COLUMN " + name + " " + kind)
+
+
+def init_db():
+    c = db()
+
+    if c.pg:
+        statements = [
+            """CREATE TABLE IF NOT EXISTS jobs (
+              id BIGSERIAL PRIMARY KEY, external_id TEXT UNIQUE NOT NULL, source TEXT NOT NULL,
+              title TEXT NOT NULL, company TEXT NOT NULL, location TEXT, work_mode TEXT,
+              salary_min DOUBLE PRECISION, salary_max DOUBLE PRECISION, experience_min DOUBLE PRECISION,
+              source_url TEXT, url TEXT NOT NULL, description TEXT NOT NULL, discovered_at TEXT NOT NULL,
+              match_score DOUBLE PRECISION DEFAULT 0, status TEXT DEFAULT 'new', skip_reason TEXT)""",
+            """CREATE TABLE IF NOT EXISTS applications (
+              id BIGSERIAL PRIMARY KEY, job_id BIGINT NOT NULL, tailored_summary TEXT,
+              cover_letter TEXT, answers_json TEXT, status TEXT NOT NULL DEFAULT 'draft',
+              created_at TEXT NOT NULL, updated_at TEXT NOT NULL)""",
+            """CREATE TABLE IF NOT EXISTS settings (
+              key TEXT PRIMARY KEY, value TEXT NOT NULL)""",
+        ]
+    else:
+        statements = [
+            """CREATE TABLE IF NOT EXISTS jobs (
+              id INTEGER PRIMARY KEY AUTOINCREMENT, external_id TEXT UNIQUE NOT NULL, source TEXT NOT NULL,
+              title TEXT NOT NULL, company TEXT NOT NULL, location TEXT, work_mode TEXT,
+              salary_min REAL, salary_max REAL, experience_min REAL,
+              source_url TEXT, url TEXT NOT NULL, description TEXT NOT NULL, discovered_at TEXT NOT NULL,
+              match_score REAL DEFAULT 0, status TEXT DEFAULT 'new', skip_reason TEXT)""",
+            """CREATE TABLE IF NOT EXISTS applications (
+              id INTEGER PRIMARY KEY AUTOINCREMENT, job_id INTEGER NOT NULL, tailored_summary TEXT,
+              cover_letter TEXT, answers_json TEXT, status TEXT NOT NULL DEFAULT 'draft',
+              created_at TEXT NOT NULL, updated_at TEXT NOT NULL)""",
+            """CREATE TABLE IF NOT EXISTS settings (
+              key TEXT PRIMARY KEY, value TEXT NOT NULL)""",
+
+        ]
+
+    for statement in statements:
+        c.execute(statement)
+
+    ensure_schema_columns(c)
+
+    candidate_json = json.dumps(CANDIDATE)
+    if c.pg:
+        c.execute(
+            "INSERT INTO settings(key,value) VALUES(?,?) "
+            "ON CONFLICT(key) DO UPDATE SET value=EXCLUDED.value",
+            ("candidate", candidate_json),
+        )
+    else:
+        c.execute(
+            "INSERT OR REPLACE INTO settings(key,value) VALUES(?,?)",
+            ("candidate", candidate_json),
+        )
+
+    c.commit()
+    c.close()
+
+def tokens(text):
+    return {
+        x for x in re.findall(r"[a-zA-Z][a-zA-Z0-9+#./-]*", text.lower())
+        if x not in STOPWORDS
+    }
+
+
+def extract_salary(text):
+    vals = []
+    patterns = [
+        r"(?:₹|rs\.?|inr\s*)?\s*(\d+(?:\.\d+)?)\s*(?:-|to)\s*(\d+(?:\.\d+)?)\s*l(?:pa|akh)?",
+        r"(?:₹|rs\.?|inr\s*)?\s*(\d+(?:\.\d+)?)\s*lpa",
+    ]
+    for idx, pattern in enumerate(patterns):
+        for m in re.finditer(pattern, text, re.I):
+            vals.extend([float(m.group(1)), float(m.group(2))] if idx == 0 else [float(m.group(1))])
+    return (min(vals), max(vals)) if vals else (None, None)
+
+
+def extract_experience(text):
+    vals = [float(m.group(1)) for m in re.finditer(r"(\d+(?:\.\d+)?)\s*\+?\s*(?:years?|yrs?)", text, re.I)]
+    return min(vals) if vals else None
+
+
+def score_job(j):
+    text = ((j.get("title") or "") + " " + (j.get("description") or "")).lower()
+    title = (j.get("title") or "").lower()
+    score = 0
+    reasons, matched = [], []
+    role_hit = False
+
+    requested = (j.get("_query") or "").strip().lower()
+    requested_tokens = tokens(requested)
+    title_tokens = tokens(title)
+    query_overlap = len(requested_tokens & title_tokens) if requested_tokens else 0
+
+    for role, keywords in ROLE_KEYWORDS.items():
+        if any(k in title for k in keywords):
+            role_hit = True
+            score += 36 if role in CANDIDATE["roles_primary"] else 18
+            reasons.append(f"Role matches {role}")
+            break
+
+    if not role_hit and requested_tokens:
+        overlap_ratio = query_overlap / max(1, len(requested_tokens))
+        role_words = {"qa", "quality", "assurance", "automation", "automated", "tester", "testing", "test", "sdet", "software"}
+        title_role_overlap = len(title_tokens & role_words)
+        if overlap_ratio >= 0.5 and title_role_overlap >= 2:
+            role_hit = True
+            score += 30
+            reasons.append("Title closely matches requested role")
+
+    if not role_hit:
+        return 0, ["Role does not match configured targets"], []
+
+    exp = j.get("experience_min")
+    if exp is not None:
+        if exp <= CANDIDATE["experience_years"] + 1:
+            score += 20
+            reasons.append("Experience requirement is within configured range")
+        else:
+            return 0, [f"Experience requirement {exp:g}+ years exceeds limit"], []
+
+    loc = (j.get("location") or "").lower()
+    mode = (j.get("work_mode") or "").lower()
+    loc_ok = (
+        any(x.lower() in loc for x in CANDIDATE["locations"] if x.lower() not in {"india", "remote"})
+        or "remote" in loc or "india" in loc or not loc
+    )
+    if not loc_ok:
+        return 0, ["Location is outside preferences"], []
+
+    score += 15
+    reasons.append("Location matches preferences")
+
+    if not mode or "hybrid" in mode or "remote" in mode:
+        score += 8
+
+    smax = j.get("salary_max")
+    if smax is not None and smax < CANDIDATE["minimum_ctc_lpa"]:
+        return 0, ["Salary is below minimum threshold"], []
+    if smax is not None:
+        score += 15 if smax >= CANDIDATE["expected_ctc_min_lpa"] else 8
+        reasons.append("Salary meets minimum threshold")
+    else:
+        score += 3
+        reasons.append("Salary not disclosed; needs verification")
+
+    jt = tokens(text)
+    for skill in CANDIDATE["skills"]:
+        if skill.lower() in jt or skill.lower().replace(" ", "-") in jt:
+            matched.append(skill)
+
+    score += min(12, len(matched))
+    reasons.append(f"{len(matched)} relevant skills detected")
+    return min(100, score), reasons, matched
+
+
+def job_fingerprint(job):
+    raw = "|".join([
+        (job.get("company") or "").strip().lower(),
+        (job.get("title") or "").strip().lower(),
+        (job.get("url") or "").strip().lower(),
+    ])
+    return hashlib.sha256(raw.encode()).hexdigest()
+
+
+def make_answers(job):
+    title, company = job["title"], job["company"]
+    return {
+        "why_interested": f"I’m interested in the {title} opportunity at {company} because it aligns with my hands-on experience in QA automation, Playwright, API validation, mobile testing and AI-assisted testing. In my current QA role, I work across functional, regression, integration and end-to-end testing and build reusable automation workflows.",
+        "why_hire": "I bring hands-on experience across manual and automation testing, with practical exposure to Playwright, JavaScript/TypeScript, Appium, API validation, SQL, CI/CD and real-device testing. I also use AI-assisted workflows for test design, automation development, debugging and edge-case analysis while validating the output against requirements.",
+        "expected_salary": "₹4–5 LPA, negotiable based on the role, responsibilities, overall compensation and growth opportunity.",
+        "relocation": "Yes. I am open to relocating for the right opportunity, particularly to Bengaluru or Pune.",
+        "sponsorship": "No.",
+        "join": "I currently have a 45-day notice period.",
+        "automation_experience": "Around 1 year of hands-on QA automation experience using Playwright with JavaScript/TypeScript and Page Object Model, plus Appium for Android and iOS mobile automation. I have also worked with API validation, SQL/database validation, cross-browser/device testing and end-to-end workflows.",
+        "playwright_experience": "Approximately 1 year of hands-on experience.",
+        "selenium_experience": "I do not currently list professional Selenium experience on my resume.",
+        "authorized_india": "Yes.",
+    }
+
+
+def build_search_links(query, location="", remote=False):
+    # Kept only for backwards-compatible API consumers. Discovery itself is now
+    # performed server-side by authorized job APIs and configured feeds.
+    return {
+        "mode": "in_app",
+        "query": query.strip() or "QA Automation Engineer",
+        "location": location.strip() or "India",
+        "remote": bool(remote),
+        "note": "ApplyBot performs discovery inside the application using authorized APIs and configured feeds."
+    }
+
+
+def strip_html(text):
+    return re.sub(r"<[^>]+>", " ", text or "").replace("&nbsp;", " ").strip()
+
+
+def parse_salary_text(text):
+    if not text:
+        return None, None
+    numbers = []
+    for raw in re.findall(r"(\d[\d,]*(?:\.\d+)?)", text.replace(",", "")):
+        try:
+            numbers.append(float(raw))
+        except ValueError:
+            pass
+    if not numbers:
+        return None, None
+    return min(numbers), max(numbers)
+
+
+def fetch_json(url, params=None, headers=None, timeout=None):
+    from urllib.parse import urlencode
+    import gzip
+    target = url
+    if params:
+        target += ("&" if "?" in target else "?") + urlencode(params)
+    request_headers = {
+        "User-Agent": "ApplyBot/1.0 (+in-app job discovery)",
+        "Accept": "application/json",
+        "Accept-Encoding": "gzip",
+        "Cache-Control": "no-cache",
+    }
+    if headers:
+        request_headers.update(headers)
+    req = urllib.request.Request(target, headers=request_headers)
+    try:
+        with urllib.request.urlopen(req, timeout=timeout or JOBICY_TIMEOUT) as response:
+            raw = response.read()
+            if response.headers.get("Content-Encoding", "").lower() == "gzip":
+                raw = gzip.decompress(raw)
+            return json.loads(raw.decode("utf-8"))
+    except Exception as exc:
+        raise RuntimeError(f"GET {target} failed: {exc}") from exc
+
+
+def post_json(url, payload, headers=None, timeout=120):
+    body = json.dumps(payload).encode("utf-8")
+    request_headers = {"User-Agent": "ApplyBot/2.0 (+live LinkedIn job discovery)", "Accept": "application/json", "Content-Type": "application/json"}
+    if headers:
+        request_headers.update(headers)
+    req = urllib.request.Request(url, data=body, headers=request_headers, method="POST")
+    with urllib.request.urlopen(req, timeout=timeout) as response:
+        raw = response.read().decode("utf-8")
+        return json.loads(raw) if raw else {}
+
+
+def _first_value(raw, *keys):
+    for key in keys:
+        value = raw.get(key)
+        if value not in (None, ""):
+            return value
+    return ""
+
+
+def normalize_linkedin_jobs(data):
+    rows = data if isinstance(data, list) else (data.get("data") or data.get("results") or data.get("items") or [])
+    jobs = []
+    for raw in rows:
+        if not isinstance(raw, dict):
+            continue
+        title = str(_first_value(raw, "jobTitle", "job_title", "title", "position")).strip()
+        company = str(_first_value(raw, "companyName", "company_name", "company")).strip()
+        location = str(_first_value(raw, "location", "jobLocation", "job_location")).strip()
+        description = strip_html(str(_first_value(raw, "jobDescription", "description", "job_description")))
+        linkedin_url = str(_first_value(raw, "jobUrl", "job_url", "linkedinUrl", "linkedin_url", "url")).strip()
+        apply_url = str(_first_value(raw, "applyUrl", "apply_url", "applicationUrl", "application_url")).strip()
+        if not title or not company or not linkedin_url:
+            continue
+        salary_text = str(_first_value(raw, "salary", "salaryInfo", "salary_range", "salaryRange")).strip()
+        smin, smax = extract_salary(description + " " + salary_text)
+        if smin is None and smax is None:
+            smin, smax = parse_salary_text(salary_text)
+        exp = extract_experience(description + " " + str(_first_value(raw, "experienceLevel", "experience", "yearsOfExperience")).strip())
+        if isinstance(raw.get("yearsOfExperience"), list) and raw["yearsOfExperience"]:
+            try:
+                exp = float(re.search(r"\d+(?:\.\d+)?", str(raw["yearsOfExperience"][0])).group())
+            except Exception:
+                pass
+        remote_value = str(_first_value(raw, "isRemote", "remote", "workplaceType", "workplace_type", "workType")).lower()
+        work_mode = "Remote" if "remote" in remote_value or "remote" in (location + " " + description).lower() else ""
+        external_id = str(_first_value(raw, "jobId", "job_id", "linkedin_job_id", "id")).strip()
+        usable_apply = apply_url if apply_url and "linkedin.com/jobs" not in apply_url.lower() else ""
+        jobs.append({
+            "external_id": "linkedin:" + (external_id or job_fingerprint({"company": company, "title": title, "url": linkedin_url})),
+            "source": "LinkedIn",
+            "source_url": linkedin_url,
+            "title": title, "company": company, "location": location, "work_mode": work_mode,
+            "salary_min": smin, "salary_max": smax, "experience_min": exp,
+            "url": usable_apply or linkedin_url, "description": description or title,
+            "application_url": usable_apply,
+            "application_type": str(_first_value(raw, "applyType", "applicationType")).strip(),
+            "posted_at": str(_first_value(raw, "postedAt", "postedDate", "publishedAt", "posted_date")).strip(),
+            "employment_type": str(_first_value(raw, "employmentType", "contractType", "job_type")).strip(),
+            "seniority": str(_first_value(raw, "seniorityLevel", "experienceLevel", "seniority")).strip(),
+        })
+    return jobs
+
+
+def normalize_jobicy_jobs(data):
+    jobs = []
+    rows = data.get("jobs", []) if isinstance(data, dict) else []
+    for raw in rows:
+        if not isinstance(raw, dict):
+            continue
+        title = str(raw.get("jobTitle") or "").strip()
+        company = str(raw.get("companyName") or "Unknown").strip()
+        url = str(raw.get("url") or "").strip()
+        if not title or not company or not url:
+            continue
+        description = strip_html(raw.get("jobDescription") or raw.get("jobExcerpt") or "")
+        salary_min, salary_max = raw.get("salaryMin"), raw.get("salaryMax")
+        try:
+            salary_min = float(salary_min) if salary_min is not None else None
+            salary_max = float(salary_max) if salary_max is not None else None
+        except (TypeError, ValueError):
+            salary_min, salary_max = None, None
+        currency = str(raw.get("salaryCurrency") or "").upper()
+        if currency != "INR":
+            salary_min = salary_max = None
+        if salary_min is not None:
+            salary_min /= 100000
+        if salary_max is not None:
+            salary_max /= 100000
+        location = str(raw.get("jobGeo") or "Anywhere").strip()
+        job_level = str(raw.get("jobLevel") or "").strip()
+        job_id = raw.get("id")
+        jobicy_url = f"https://jobicy.com/jobs/{job_id}" if job_id else url
+        jobs.append({
+            "external_id": "jobicy:" + str(raw.get("id") or raw.get("jobSlug") or url),
+            "source": "Jobicy",
+            "source_url": jobicy_url,
             "title": title,
             "company": company,
             "location": location,
@@ -1152,6 +1638,27 @@ def auto_apply_job(job_id, threshold=70, max_experience=2, min_salary=3):
             "application_id": app_row["id"] if app_row else None, "adapter": result.get("adapter"), "message": result.get("message")}
 
 
+@app.post("/api/jobs/<int:job_id>/prepare")
+def prepare_application(job_id):
+    c = db()
+    row = c.execute("SELECT * FROM jobs WHERE id=?", (job_id,)).fetchone()
+    if not row:
+        c.close()
+        return jsonify({"error": "Job was not found."}), 404
+    job = dict(row)
+    answers = make_answers(job)
+    now = utcnow()
+    cover = answers.get("why_interested", "")
+    c.execute(
+        """INSERT INTO applications(job_id,tailored_summary,cover_letter,answers_json,status,created_at,updated_at,adapter,submission_id,submission_message,submitted_at)
+        VALUES(?,?,?,?,?,?,?,?,?,?,?)""",
+        (job_id, job["title"], cover, json.dumps(answers), "application_ready", now, now, detect_application_adapter(job["url"]), None, "Application prepared; not submitted.", None)
+    )
+    c.commit()
+    app_row = c.execute("SELECT id FROM applications WHERE job_id=? ORDER BY id DESC LIMIT 1", (job_id,)).fetchone()
+    c.close()
+    return jsonify({"ok": True, "application_id": app_row["id"] if app_row else None, "status": "application_ready", "answers": answers})
+
 @app.post("/api/jobs/<int:job_id>/auto-apply")
 def auto_apply(job_id):
     body = request.get_json(silent=True) or {}
@@ -1176,7 +1683,7 @@ def applications():
 def application_status(application_id):
     body = request.get_json(silent=True) or {}
     status = str(body.get("status") or "").strip()
-    allowed = {"draft","application_ready","requires_user_action","requires_configuration","failed","applied","rejected","interview","offer","closed"}
+    allowed = {"draft","application_ready","approved","requires_user_action","requires_configuration","failed","unsupported","unsupported_source_policy","applied","rejected","interview","offer","closed"}
     if status not in allowed:
         return jsonify({"error": "Invalid application status."}), 400
     c = db()
