@@ -1,165 +1,143 @@
 <!doctype html>
 <html lang="en">
 <head>
-<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>ApplyBot</title>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>ApplyBot — Job Discovery & Auto Apply</title>
 <style>
-:root{--bg:#0b1020;--panel:#11182b;--muted:#91a0b8;--text:#f4f7fb;--line:#22304c;--accent:#76a9ff;--good:#39d98a;--warn:#ffc857}
-*{box-sizing:border-box}body{margin:0;font-family:Inter,system-ui,-apple-system,Segoe UI,sans-serif;background:linear-gradient(160deg,#090d18,#111a30);color:var(--text)}
-header{padding:22px 5vw;border-bottom:1px solid var(--line);display:flex;justify-content:space-between;align-items:center;position:sticky;top:0;background:#0b1020e8;backdrop-filter:blur(12px);z-index:2}
-.brand{font-size:22px;font-weight:800}.badge{font-size:12px;padding:5px 9px;border:1px solid #31506f;border-radius:99px;color:#bfe0ff}
-.wrap{padding:28px 5vw;max-width:1400px;margin:auto}.grid{display:grid;grid-template-columns:repeat(4,1fr);gap:14px}
-.card{background:linear-gradient(180deg,#131b2f,#0f1627);border:1px solid var(--line);border-radius:16px;padding:18px}.kpi b{font-size:30px;display:block;margin-top:4px}.muted{color:var(--muted)}
-.jobs{margin-top:20px;display:grid;gap:12px}.job{display:grid;grid-template-columns:1.6fr .8fr .6fr .7fr auto;gap:12px;align-items:center}
-.score{font-weight:800;color:var(--good)}button{border:0;border-radius:10px;padding:10px 13px;background:var(--accent);color:#071021;font-weight:700;cursor:pointer}
-button.secondary{background:#202d47;color:#dce8ff}.pill{padding:5px 8px;border-radius:8px;background:#18233a;color:#bdd0ee;font-size:12px;display:inline-block}
-.empty{padding:50px;text-align:center;color:var(--muted)}.modal{position:fixed;inset:0;background:#0009;display:none;align-items:center;justify-content:center;padding:20px;z-index:5}
-.modal.on{display:flex}.modalbox{max-width:980px;width:100%;max-height:90vh;overflow:auto;background:#10192c;border:1px solid var(--line);border-radius:18px;padding:24px}
-.tabs{display:flex;gap:8px;flex-wrap:wrap;margin:15px 0}.tab{background:#1a2740;color:#cfe0fb}.tab.active{background:#76a9ff;color:#071021}
-.pre{white-space:pre-wrap;background:#0a1120;border:1px solid var(--line);padding:14px;border-radius:10px}.actions{display:flex;justify-content:flex-end;gap:8px;margin-top:15px}
-input,textarea{width:100%;padding:11px;border-radius:10px;border:1px solid var(--line);background:#0a1120;color:var(--text);outline:none}
-textarea{min-height:130px;resize:vertical}.searchbox{margin-top:16px;padding:16px;border:1px solid var(--line);border-radius:14px;background:#0b1324}.searchrow,.feedrow{display:grid;grid-template-columns:1.5fr 1fr auto;gap:8px}.searchactions{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}.hint{font-size:12px;color:var(--muted);margin-top:9px}.check{display:flex;align-items:center;gap:7px;padding:0 10px;color:#cfe0fb;font-size:13px;white-space:nowrap}.check input{width:auto}.divider{height:1px;background:var(--line);margin:18px 0}.subhead{font-weight:700;margin-bottom:8px}.feedexamples{margin-top:10px;padding:10px 12px;border:1px dashed var(--line);border-radius:10px;font-size:12px;line-height:1.8}.feedexamples code{color:#bfe0ff}.manualgrid{display:grid;grid-template-columns:1fr 1fr;gap:8px}.manualgrid textarea{grid-column:1/-1}
-@media(max-width:900px){.grid{grid-template-columns:repeat(2,1fr)}.job{grid-template-columns:1fr 1fr}.job button{grid-column:1/-1;width:100%}.searchrow,.feedrow{grid-template-columns:1fr 1fr}.check{padding:8px 0}.manualgrid{grid-template-columns:1fr}.manualgrid textarea{grid-column:auto}}
-@media(max-width:560px){.grid{grid-template-columns:1fr}.wrap{padding:20px 4vw}header{padding:18px 4vw}.brand{font-size:18px}.modalbox{padding:18px}}
+:root{--bg:#08111f;--panel:#101c30;--panel2:#0c1728;--line:#223653;--text:#eef5ff;--muted:#8fa4bf;--blue:#75a9ff;--green:#3ddd91;--yellow:#ffd166;--red:#ff6b7a}
+*{box-sizing:border-box}body{margin:0;background:radial-gradient(circle at 15% 0,#162b4b 0,#08111f 38%,#060d18 100%);color:var(--text);font:14px Inter,system-ui,-apple-system,Segoe UI,sans-serif}
+header{position:sticky;top:0;z-index:10;background:#08111fee;backdrop-filter:blur(16px);border-bottom:1px solid var(--line);padding:16px 4vw;display:flex;justify-content:space-between;align-items:center;gap:15px}
+.brand{font-size:21px;font-weight:900}.badge{font-size:11px;color:#bcd8ff;border:1px solid #31527b;padding:5px 8px;border-radius:99px;margin-left:7px}.wrap{max-width:1450px;margin:auto;padding:25px 4vw 60px}
+.grid{display:grid;grid-template-columns:repeat(4,1fr);gap:12px}.card{background:linear-gradient(180deg,#122038,#0e192b);border:1px solid var(--line);border-radius:16px;padding:18px}.kpi b{font-size:28px;display:block;margin-top:5px}.muted{color:var(--muted)}
+.controls{display:grid;grid-template-columns:2fr 1fr 1fr 1fr;gap:10px}.controls+.controls{margin-top:10px}.field span{display:block;font-size:11px;color:var(--muted);margin-bottom:5px}
+input,button{font:inherit}input,select{width:100%;background:#081322;border:1px solid #29415f;color:var(--text);border-radius:10px;padding:11px;outline:none}
+button{border:0;border-radius:10px;padding:10px 13px;background:var(--blue);color:#06101d;font-weight:800;cursor:pointer}button.secondary{background:#1b2b45;color:#dceaff}button.danger{background:#3a1f2a;color:#ffb5bf}
+.actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}.status{margin-top:12px;padding:10px 12px;background:#091525;border:1px solid var(--line);border-radius:10px;color:#b9cce4}
+.jobs{display:grid;gap:12px;margin-top:15px}.job{display:grid;grid-template-columns:1.6fr .8fr .65fr 1fr auto;gap:12px;align-items:start}.title{font-size:16px;font-weight:850}.score{font-size:20px;font-weight:900;color:var(--green)}.pill{display:inline-block;padding:5px 8px;border-radius:8px;background:#182943;color:#c7daf4;font-size:11px}.source{color:#b8d5ff}.reason{font-size:12px;color:#b2c4db;line-height:1.55;margin-top:7px}.skills{display:flex;flex-wrap:wrap;gap:5px;margin-top:7px}.skill{font-size:10px;border:1px solid #29415f;padding:4px 6px;border-radius:99px;color:#a9caff}.jobmeta{font-size:12px;color:var(--muted);margin-top:5px}.empty{text-align:center;padding:50px;color:var(--muted)}
+details{margin-top:8px}summary{cursor:pointer;color:#bcd8ff;font-size:12px}.history{margin-top:14px;display:grid;gap:8px}.historyrow{display:grid;grid-template-columns:1.5fr .7fr .8fr 2fr;gap:10px;padding:11px;border:1px solid var(--line);border-radius:10px;background:#0a1525;font-size:12px}
+.config{display:grid;grid-template-columns:repeat(5,1fr);gap:8px;margin-top:12px}.check{padding:9px;border-radius:9px;background:#0a1525;border:1px solid var(--line);font-size:11px}.ok{color:var(--green)}.bad{color:var(--red)}
+@media(max-width:1000px){.grid{grid-template-columns:repeat(2,1fr)}.controls{grid-template-columns:1fr 1fr}.job{grid-template-columns:1fr 1fr}.job button{grid-column:1/-1;width:100%}.config{grid-template-columns:repeat(2,1fr)}}
+@media(max-width:600px){.grid,.controls,.config{grid-template-columns:1fr}.wrap{padding:18px 4vw}.job{grid-template-columns:1fr}.job button{grid-column:auto}.brand{font-size:18px}header{padding:14px 4vw}.hide-mobile{display:none}}
 </style>
 </head>
 <body>
-<header><div class="brand">ApplyBot <span class="badge">AI Job Application Assistant</span></div><div class="muted">Human approval required for submission</div></header>
+<header><div class="brand">ApplyBot <span class="badge">END-TO-END JOB AUTOMATION</span></div><div class="muted hide-mobile">Source → Match → Apply → Evidence</div></header>
 <main class="wrap">
 <section class="grid">
-<div class="card kpi"><span class="muted">Jobs discovered</span><b id="k1">0</b></div>
-<div class="card kpi"><span class="muted">Ready matches</span><b id="k2">0</b></div>
-<div class="card kpi"><span class="muted">Applications</span><b id="k3">0</b></div>
-<div class="card kpi"><span class="muted">Configured floor</span><b>₹3L</b></div>
+<div class="card kpi"><span class="muted">Jobs found</span><b id="kFound">0</b></div>
+<div class="card kpi"><span class="muted">Qualified</span><b id="kQualified">0</b></div>
+<div class="card kpi"><span class="muted">Submitted</span><b id="kSubmitted">0</b></div>
+<div class="card kpi"><span class="muted">Needs action</span><b id="kAction">0</b></div>
 </section>
-<section class="card" style="margin-top:20px">
-<div style="display:flex;justify-content:space-between;gap:12px;align-items:center;flex-wrap:wrap">
-<div><h2 style="margin:0 0 5px">Job Discovery</h2><div class="muted">Search authorized job APIs and your configured feeds directly inside ApplyBot. No hiring-site search page is opened.</div></div>
-<div style="display:flex;gap:8px"><button onclick="discover()">Discover & score jobs</button><button class="secondary" onclick="load()">Refresh</button></div>
+
+<section class="card" style="margin-top:15px">
+<h2 style="margin:0 0 6px">1. Find the jobs you actually want</h2>
+<div class="muted">ApplyBot fetches listings inside the application and shows the exact source, URL, score, matching skills and rejection/qualification reasons.</div>
+<div class="controls" style="margin-top:15px">
+<div class="field"><span>Desired job / keywords</span><input id="query" value="QA Automation Engineer"></div>
+<div class="field"><span>Location</span><input id="location" value="India"></div>
+<div class="field"><span>Minimum match %</span><input id="threshold" type="number" min="1" max="100" value="70"></div>
+<div class="field"><span>Max experience (years)</span><input id="maxExp" type="number" min="0" step=".5" value="2"></div>
 </div>
-<div class="searchbox">
-<div class="searchrow">
-<input id="searchQuery" value="QA Automation Engineer" placeholder="Role / keywords">
-<input id="searchLocation" value="India" placeholder="Location">
-<label class="check"><input id="searchRemote" type="checkbox"> Remote only</label>
+<div class="controls">
+<div class="field"><span>Minimum salary (LPA)</span><input id="minSalary" type="number" min="0" step=".5" value="3"></div>
+<div class="field"><span>Remote</span><select id="remote"><option value="false">Any</option><option value="true">Remote only</option></select></div>
+<div class="field"><span>Maximum automatic applications</span><input id="maxApply" type="number" min="1" max="10" value="3"></div>
+<div class="actions" style="margin-top:18px"><button onclick="discover(false)">Search & Score</button><button onclick="discover(true)">Search + Auto Apply</button></div>
 </div>
-<div class="searchactions">
-<button onclick="searchInApp()">Search inside ApplyBot</button>
-</div>
-<div class="hint">ApplyBot fetches job data server-side from authorized public APIs, normalizes it, filters it to your criteria, scores it against your profile, and stores the results here.</div>
-<div class="feedexamples">
-<b>Built-in sources</b>
-<div><code>Remotive</code> — remote jobs with keyword search</div>
-<div><code>Arbeitnow</code> — public job-board API data aggregated from ATS sources</div>
-<div class="hint">Additional authorized RSS/Atom feeds can be added below. Results remain inside the ApplyBot dashboard.</div>
-</div>
-</div>
-<div class="divider"></div>
-<div class="subhead">Authorized RSS / Atom feed</div>
-<div class="hint">A feed must return RSS or Atom XML containing job entries. Do not paste a normal LinkedIn Jobs page URL here.</div>
-<div class="feedrow">
-<input id="feedName" placeholder="Feed name, e.g. Company Jobs">
-<input id="feedUrl" placeholder="https://company.example/jobs/feed.xml">
-<button class="secondary" onclick="addFeed()">Add feed</button>
-</div>
-<div class="feedexamples">
-<b>Example feed URL formats</b>
-<div><code>https://example.com/jobs/feed.xml</code></div>
-<div><code>https://example.com/careers/rss</code></div>
-<div class="hint">If the URL opens a normal HTML webpage instead of XML/RSS/Atom, it is not a valid feed for this field.</div>
-</div>
-<div id="feedStatus" class="muted" style="margin-top:10px"></div>
-<div class="divider"></div>
-<div class="subhead">Analyze a job you found</div>
-<div class="manualgrid">
-<input id="manualTitle" placeholder="Job title">
-<input id="manualCompany" placeholder="Company">
-<input id="manualLocation" placeholder="Location">
-<input id="manualWorkMode" placeholder="Remote / Hybrid / On-site">
-<input id="manualUrl" placeholder="Job URL">
-<textarea id="manualDescription" placeholder="Paste the job description here"></textarea>
-</div>
-<div class="searchactions"><button class="secondary" onclick="importManual()">Analyze & add job</button></div>
-<div class="hint">Paste details from a job you are authorized to view, including a LinkedIn job. ApplyBot will score it and prepare the application. Discovery itself no longer requires opening LinkedIn, Google, or another hiring-site search page.</div>
+<div id="status" class="status">Ready.</div>
+<div class="config" id="config"></div>
 </section>
-<section class="card" style="margin-top:20px">
-<div style="display:flex;justify-content:space-between;gap:12px;align-items:center;flex-wrap:wrap">
-<div><h2 style="margin:0 0 5px">Auto Job Apply</h2><div class="muted">Find matching jobs inside ApplyBot, enforce your threshold, and automatically prepare qualified applications.</div></div>
-<div style="display:flex;gap:8px"><button onclick="discover()">Find & Auto-Apply</button><button class="secondary" onclick="load()">Refresh</button></div>
+
+<section class="card" style="margin-top:15px">
+<div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap">
+<div><h2 style="margin:0 0 5px">2. Results & evidence</h2><div class="muted">Every result records where it came from and why it passed or failed.</div></div>
+<button class="secondary" onclick="loadAll()">Refresh</button>
 </div>
-<div class="searchbox">
-<div class="searchrow">
-<input id="searchQuery" value="QA Automation Engineer" placeholder="Desired job / keywords">
-<input id="searchLocation" value="India" placeholder="Location">
-<label class="check"><input id="searchRemote" type="checkbox"> Remote only</label>
-</div>
-<div class="searchrow" style="margin-top:8px">
-<label><span class="hint">Minimum match %</span><input id="threshold" type="number" min="1" max="100" value="70"></label>
-<label><span class="hint">Maximum experience (years)</span><input id="maxExperience" type="number" min="0" step="0.5" value="2"></label>
-<label><span class="hint">Minimum salary (LPA)</span><input id="minSalary" type="number" min="0" step="0.5" value="3"></label>
-</div>
-<div class="searchactions"><button onclick="searchInApp()">Search & score only</button><button class="secondary" onclick="discover()">Search + auto-apply qualified jobs</button></div>
-<div class="hint">The application uses public/authorized job-source APIs. It does not use passwords, session cookies, CAPTCHA bypasses, or stealth automation. Only jobs meeting your threshold are sent into the application workflow.</div>
-</div>
-<div id="feedStatus" class="muted" style="margin-top:10px"></div>
-<div class="divider"></div>
-<div class="subhead">Application profile</div>
-<div class="hint">ApplyBot uses your configured candidate profile and generates answers without inventing qualifications. Automatic submission to a third-party site requires that site's permitted application flow; CAPTCHA/login challenges are never bypassed.</div>
+<div id="jobs" class="jobs"><div class="empty">Run a search to populate this list.</div></div>
+</section>
+
+<section class="card" style="margin-top:15px">
+<h2 style="margin:0 0 5px">3. Application history</h2>
+<div class="muted">Submission state is only marked <b>Submitted</b> after the supported ATS workflow completes. CAPTCHA/login challenges are stopped and shown as user action required.</div>
+<div id="history" class="history"></div>
 </section>
 </main>
-<div id="modal" class="modal"><div class="modalbox">
-<div style="display:flex;justify-content:space-between;gap:12px;align-items:start"><div><h2 style="margin:0">Application draft</h2><div id="mmeta" class="muted"></div></div><button class="secondary" onclick="closeModal()">Close</button></div>
-<div class="tabs"><button class="tab active" onclick="showTab('summary',this)">Summary</button><button class="tab" onclick="showTab('cover',this)">Cover letter</button><button class="tab" onclick="showTab('answers',this)">Questions</button></div>
-<div id="tab-summary"></div><div id="tab-cover" style="display:none"></div><div id="tab-answers" style="display:none"></div>
-<div class="actions"><button class="secondary" onclick="mark('rejected')">Reject</button><button onclick="mark('approved')">Approve for submission</button></div>
-</div></div>
 <script>
-let currentApp=null;
-async function load(){
- const [jr,ar]=await Promise.all([fetch('/api/jobs').then(r=>r.json()),fetch('/api/applications').then(r=>r.json())]);
- document.querySelector('#k1').textContent=jr.length;document.querySelector('#k2').textContent=jr.filter(x=>x.status==='ready'||x.status==='application_ready').length;document.querySelector('#k3').textContent=ar.length;
- const el=document.querySelector('#jobs');
- if(!jr.length){el.innerHTML='<div class="empty">No jobs yet. Enter your desired role, location and threshold, then search.</div>';return}
- el.innerHTML=jr.map(j=>`<div class="card job"><div><b>${esc(j.title)}</b><div class="muted">${esc(j.company)} · ${esc(j.location||'Location undisclosed')}</div></div><div><span class="pill">${esc(j.status)}</span></div><div class="score">${Math.round(j.match_score)}%</div><div>${j.salary_min||j.salary_max?'₹'+(j.salary_min||'')+'–'+(j.salary_max||'')+' LPA':'Salary TBD'}</div><button onclick="applyJob(${j.id})">Auto-apply</button></div>`).join('')
+const $=id=>document.getElementById(id);
+function esc(v){return String(v??'').replace(/[&<>'"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[c]))}
+function val(id){return $(id).value.trim()}
+async function loadConfig(){
+ const c=await fetch('/api/config').then(r=>r.json());
+ $('config').innerHTML=[
+  ['Auto apply',c.auto_apply_enabled,c.auto_apply_enabled?'Enabled':'Disabled'],
+  ['Email',c.candidate_email_configured,c.candidate_email_configured?'Configured':'Missing'],
+  ['Phone',c.candidate_phone_configured,c.candidate_phone_configured?'Configured':'Missing'],
+  ['Resume',c.resume_configured,c.resume_configured?'Configured':'Missing'],
+  ['ATS adapters',true,c.supported_browser_adapters.join(', ')]
+ ].map(x=>'<div class="check '+(x[1]?'ok':'bad')+'"><b>'+esc(x[0])+'</b><br>'+esc(x[2])+'</div>').join('');
 }
-async function searchInApp(){
- const query=document.querySelector('#searchQuery').value.trim()||'QA Automation Engineer';
- const location=document.querySelector('#searchLocation').value.trim()||'India';
- const remote=document.querySelector('#searchRemote').checked;
- const threshold=Number(document.querySelector('#threshold').value)||70;
- document.querySelector('#feedStatus').textContent='Searching and scoring jobs...';
- const r=await fetch('/api/discover/search',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({query,location,remote,threshold})});
- const x=await r.json();
- document.querySelector('#feedStatus').textContent=x.error||`Found ${x.items_seen||0} jobs · ${x.qualified_jobs||0} qualified at ${threshold}%+`;
- load();
+function jobCard(j){
+ const reasons=(j.reasons||[]).map(x=>'<div>• '+esc(x)+'</div>').join('');
+ const skills=(j.matched_skills||[]).map(x=>'<span class="skill">'+esc(x)+'</span>').join('');
+ const action=j.status==='ready'||j.status==='application_ready'
+  ? '<button onclick="applyJob('+j.id+')">Auto Apply</button>'
+  : '<button class="secondary" disabled>Not qualified</button>';
+ return '<div class="card job">'+
+  '<div><div class="title">'+esc(j.title)+'</div><div class="jobmeta">'+esc(j.company)+' · '+esc(j.location||'Location undisclosed')+'</div>'+
+  '<div class="jobmeta source">Source: '+esc(j.source||'unknown')+'</div><div class="jobmeta">URL: <a href="'+esc(j.url)+'" target="_blank" rel="noopener" style="color:#9ec6ff">'+esc(j.url)+'</a></div>'+
+  '<details><summary>Why this result?</summary><div class="reason">'+reasons+'</div><div class="skills">'+skills+'</div></details></div>'+
+  '<div><span class="pill">'+esc(j.status)+'</span><div class="jobmeta">Adapter: '+esc(adapterFor(j.url))+'</div></div>'+
+  '<div class="score">'+Math.round(Number(j.match_score||0))+'%</div>'+
+  '<div><b>'+(j.salary_max||j.salary_min?('₹'+(j.salary_min||'?')+'–'+(j.salary_max||j.salary_min)+' LPA'):'Salary undisclosed')+'</b><div class="jobmeta">'+esc(j.work_mode||'Work mode undisclosed')+'</div></div>'+
+  '<div>'+action+'</div></div>';
 }
-async function discover(){
- const query=document.querySelector('#searchQuery').value.trim()||'QA Automation Engineer';
- const location=document.querySelector('#searchLocation').value.trim()||'India';
- const remote=document.querySelector('#searchRemote').checked;
- const threshold=Number(document.querySelector('#threshold').value)||70;
- document.querySelector('#feedStatus').textContent='Finding jobs and auto-applying qualified matches...';
- const r=await fetch('/api/discover',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({query,location,remote,threshold})});
+function adapterFor(url){const u=(url||'').toLowerCase();if(u.includes('greenhouse.io'))return 'greenhouse';if(u.includes('lever.co'))return 'lever';return 'unsupported'}
+async function loadJobs(){
+ const jobs=await fetch('/api/jobs').then(r=>r.json());
+ $('kFound').textContent=jobs.length;
+ $('kQualified').textContent=jobs.filter(j=>Number(j.match_score||0)>=Number(val('threshold')||70)).length;
+ $('jobs').innerHTML=jobs.length?jobs.map(jobCard).join(''):'<div class="empty">No jobs found yet.</div>';
+}
+async function loadHistory(){
+ const apps=await fetch('/api/applications').then(r=>r.json());
+ $('kSubmitted').textContent=apps.filter(a=>a.status==='applied').length;
+ $('kAction').textContent=apps.filter(a=>['requires_user_action','requires_configuration','failed','unsupported'].includes(a.status)).length;
+ $('history').innerHTML=apps.length?apps.map(a=>'<div class="historyrow"><div><b>'+esc(a.title)+'</b><br>'+esc(a.company)+'</div><div>'+esc(a.status)+'</div><div>'+esc(a.adapter||'—')+'</div><div>'+esc(a.submission_message||'—')+'</div></div>').join(''):'<div class="empty">No application attempts yet.</div>';
+}
+async function loadAll(){await Promise.all([loadConfig(),loadJobs(),loadHistory()])}
+async function discover(auto){
+ const payload={query:val('query')||'QA Automation Engineer',location:val('location')||'India',remote:$('remote').value==='true',threshold:Number(val('threshold')||70),max_experience:Number(val('maxExp')||2),min_salary:Number(val('minSalary')||3)};
+ $('status').textContent='Fetching jobs from the configured sources and scoring them...';
+ const r=await fetch('/api/discover',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
  const x=await r.json();
- const qualified=(x.results||[]).filter(j=>j.score>=threshold);
- let applied=0;
- for(const j of qualified){ const ar=await fetch('/api/jobs/'+j.job_id+'/auto-apply',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({threshold})}); if(ar.ok) applied++; }
- document.querySelector('#feedStatus').textContent=x.error||`Found ${x.items_seen||0} jobs · ${qualified.length} qualified · ${applied} application workflows started`;
- load();
+ if(!r.ok){$('status').textContent=x.error||'Discovery failed';return}
+ $('status').textContent='Found '+x.items_seen+' listings from '+x.sources_checked.join(', ')+' · '+x.qualified_jobs+' qualified at '+x.threshold+'%+.';
+ await loadJobs();
+ if(auto){
+  const candidates=(x.results||[]).filter(j=>Number(j.score||0)>=x.threshold && j.job_id).slice(0,Number(val('maxApply')||3));
+  if(!candidates.length){$('status').textContent+=' No qualified jobs were sent to the application step.';return}
+  $('status').textContent+=' Starting '+candidates.length+' automatic application(s)...';
+  let submitted=0, action=0;
+  for(const j of candidates){
+   const rr=await fetch('/api/jobs/'+j.job_id+'/auto-apply',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({threshold:x.threshold})});
+   const z=await rr.json();
+   if(z.submitted)submitted++; else if(['requires_user_action','requires_configuration'].includes(z.status))action++;
+  }
+  $('status').textContent+=' Finished: '+submitted+' submitted · '+action+' require user action/configuration.';
+  await loadAll();
+ }
 }
 async function applyJob(id){
- const threshold=Number(document.querySelector('#threshold').value)||70;
+ const threshold=Number(val('threshold')||70);
+ $('status').textContent='Applying to the selected qualified job...';
  const r=await fetch('/api/jobs/'+id+'/auto-apply',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({threshold})});
  const x=await r.json();
- document.querySelector('#feedStatus').textContent=x.error||('Application workflow: '+x.status);
- load();
+ $('status').textContent=x.message||x.error||x.status;
+ await loadAll();
 }
-async function prepare(id){const x=await fetch('/api/jobs/'+id+'/prepare',{method:'POST'}).then(r=>r.json());if(x.error)return alert(x.error);currentApp=x;document.querySelector('#mmeta').textContent='Draft ID: '+x.application_id;document.querySelector('#tab-summary').innerHTML='<div class="pre">'+esc(x.summary)+'</div>';document.querySelector('#tab-cover').innerHTML='<div class="pre">'+esc(x.cover_letter)+'</div>';document.querySelector('#tab-answers').innerHTML=Object.entries(x.answers).map(([k,v])=>'<p><b>'+esc(k.replaceAll('_',' '))+'</b></p><div class="pre">'+esc(v)+'</div>').join('');document.querySelector('#modal').classList.add('on');load()}
-async function mark(status){if(!currentApp)return;await fetch('/api/applications/'+currentApp.application_id+'/status',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({status})});closeModal();load()}
-function showTab(name,btn){for(const x of ['summary','cover','answers'])document.querySelector('#tab-'+x).style.display=x===name?'block':'none';document.querySelectorAll('.tab').forEach(b=>b.classList.remove('active'));btn.classList.add('active')}
-function closeModal(){document.querySelector('#modal').classList.remove('on')}
-function esc(s){return String(s).replace(/[&<>'"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[c]))}
-load();
+loadAll();
 </script>
 </body>
 </html>
