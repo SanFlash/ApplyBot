@@ -47,8 +47,15 @@ For every discovered job the dashboard shows:
 
 Current discovery sources:
 
-- **Remotive** public job API
-- **Arbeitnow** public job-board API
+- **Adzuna** — broad live job-ad search for India; requires an `ADZUNA_APP_ID` and `ADZUNA_APP_KEY`.
+- **Greenhouse** — direct employer ATS postings when company board tokens are configured in `GREENHOUSE_BOARDS`.
+- **Lever** — direct employer ATS postings when company slugs are configured in `LEVER_COMPANIES`.
+- **Arbeitnow** — public normalized job-board data.
+- **Remotive** — discovery-only remote jobs; its public API terms prohibit submitting its listings to third-party sites.
+
+For a genuinely broad, current search, configure Adzuna. The Adzuna API provides job-ad search by keywords and location and requires an app ID/key. urlAdzuna API documentationhttps://developer.adzuna.com/overview
+
+Lever's public postings API exposes published postings, including application URLs, while its authenticated API is separate. urlLever developer documentationhttps://hire.lever.co/developer/documentation
 
 There is no RSS/Atom workflow in the current discovery path and ApplyBot does not open LinkedIn or Google as a discovery step.
 
