@@ -13,7 +13,7 @@ services:
       - key: DATABASE_URL
         sync: false
       - key: AUTO_APPLY_ENABLED
-        value: "false"
+        value: "true"
       - key: AUTO_APPLY_MAX
         value: "3"
       - key: CANDIDATE_EMAIL
