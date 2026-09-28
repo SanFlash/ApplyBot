@@ -83,7 +83,7 @@ async function loadConfig(){
   ['Email',c.candidate_email_configured,c.candidate_email_configured?'Configured':'Missing'],
   ['Phone',c.candidate_phone_configured,c.candidate_phone_configured?'Configured':'Missing'],
   ['Resume',c.resume_configured,c.resume_configured?'Configured':'Missing'],
-  ['LinkedIn provider',c.discovery_sources && c.discovery_sources.LinkedIn,c.discovery_sources && c.discovery_sources.LinkedIn ? 'Apify configured' : 'Missing API token'],
+  ['Jobicy provider',c.discovery_sources && c.discovery_sources.Jobicy,c.discovery_sources && c.discovery_sources.Jobicy ? 'Free API configured' : 'Unavailable'],
   ['ATS adapters',true,c.supported_browser_adapters.join(', ')]
  ].map(x=>'<div class="check '+(x[1]?'ok':'bad')+'"><b>'+esc(x[0])+'</b><br>'+esc(x[2])+'</div>').join('');
 }
@@ -95,7 +95,7 @@ function jobCard(j){
   : '<button class="secondary" disabled>Not qualified</button>';
  return '<div class="card job">'+
   '<div><div class="title">'+esc(j.title)+'</div><div class="jobmeta">'+esc(j.company)+' · '+esc(j.location||'Location undisclosed')+'</div>'+
-  '<div class="jobmeta source">Source: '+esc(j.source||'unknown')+'</div><div class="jobmeta">LinkedIn URL: <a href="'+esc(j.source_url||j.url)+'" target="_blank" rel="noopener" style="color:#9ec6ff">'+esc(j.source_url||j.url)+'</a></div><div class="jobmeta">Application URL: <a href="'+esc(j.url)+'" target="_blank" rel="noopener" style="color:#9ec6ff">'+esc(j.url)+'</a></div>'+
+  '<div class="jobmeta source">Source: '+esc(j.source||'unknown')+'</div><div class="jobmeta">Jobicy listing: <a href="'+esc(j.source_url||j.url)+'" target="_blank" rel="noopener" style="color:#9ec6ff">'+esc(j.source_url||j.url)+'</a></div><div class="jobmeta">Resolved application: <a href="'+esc(j.url)+'" target="_blank" rel="noopener" style="color:#9ec6ff">'+esc(j.url)+'</a></div>'+
   '<details><summary>Why this result?</summary><div class="reason">'+reasons+'</div><div class="skills">'+skills+'</div></details></div>'+
   '<div><span class="pill">'+esc(j.status)+'</span><div class="jobmeta">Adapter: '+esc(adapterFor(j.url))+'</div></div>'+
   '<div class="score">'+Math.round(Number(j.match_score||0))+'%</div>'+
@@ -118,7 +118,7 @@ async function loadHistory(){
 async function loadAll(){await Promise.all([loadConfig(),loadJobs(),loadHistory()])}
 async function discover(auto){
  const payload={query:val('query')||'QA Automation Engineer',location:val('location')||'India',remote:$('remote').value==='true',threshold:Number(val('threshold')||70),max_experience:Number(val('maxExp')||2),min_salary:Number(val('minSalary')||3)};
- $('status').textContent='Querying live LinkedIn Jobs data and scoring the returned listings...';
+ $('status').textContent='Querying live Jobicy remote-job data and scoring the returned listings...';
  const r=await fetch('/api/discover',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
  const x=await r.json();
  if(!r.ok){$('status').textContent=x.error||'Discovery failed';return}
