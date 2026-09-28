@@ -25,7 +25,9 @@ RESUME_PATH = os.getenv("RESUME_PATH", "").strip()
 ADZUNA_APP_ID = os.getenv("ADZUNA_APP_ID", "").strip()
 ADZUNA_APP_KEY = os.getenv("ADZUNA_APP_KEY", "").strip()
 JOBICY_API_URL = os.getenv("JOBICY_API_URL", "https://jobicy.com/api/v2/remote-jobs").strip()
+JOBICY_API_KEY = os.getenv("JOBICY_API_KEY", "").strip()
 JOBICY_COUNT = min(200, max(1, int(os.getenv("JOBICY_COUNT", "200"))))
+JOBICY_TIMEOUT = max(10, int(os.getenv("JOBICY_TIMEOUT", "30")))
 ENABLE_LEGACY_SOURCES = os.getenv("ENABLE_LEGACY_SOURCES", "false").lower() == "true"
 GREENHOUSE_BOARDS = [x.strip() for x in os.getenv("GREENHOUSE_BOARDS", "").split(",") if x.strip()]
 LEVER_COMPANIES = [x.strip() for x in os.getenv("LEVER_COMPANIES", "").split(",") if x.strip()]
@@ -64,7 +66,7 @@ ROLE_KEYWORDS = {
     "QA Automation Engineer": ["qa automation", "automation qa", "automation engineer", "quality assurance automation"],
     "Automation Tester": ["automation tester", "test automation", "qa automation"],
     "SDET": ["sdet", "software development engineer in test"],
-    "Software Tester": ["software tester", "qa tester", "test engineer"],
+    "Software Tester": ["software tester", "qa tester", "test engineer", "qa analyst", "quality analyst"],
     "Test Engineer": ["test engineer", "quality engineer"],
     "AI Assisted QA": ["ai assisted qa", "ai qa", "ai testing", "ai-assisted testing"],
     "AI Assisted Tester": ["ai tester", "ai-assisted tester"],
@@ -360,20 +362,29 @@ def parse_salary_text(text):
     return min(numbers), max(numbers)
 
 
-def fetch_json(url, params=None):
+def fetch_json(url, params=None, headers=None, timeout=None):
     from urllib.parse import urlencode
+    import gzip
     target = url
     if params:
         target += ("&" if "?" in target else "?") + urlencode(params)
-    req = urllib.request.Request(
-        target,
-        headers={
-            "User-Agent": "ApplyBot/1.0 (+in-app job discovery)",
-            "Accept": "application/json",
-        },
-    )
-    with urllib.request.urlopen(req, timeout=25) as response:
-        return json.loads(response.read().decode("utf-8"))
+    request_headers = {
+        "User-Agent": "ApplyBot/1.0 (+in-app job discovery)",
+        "Accept": "application/json",
+        "Accept-Encoding": "gzip",
+        "Cache-Control": "no-cache",
+    }
+    if headers:
+        request_headers.update(headers)
+    req = urllib.request.Request(target, headers=request_headers)
+    try:
+        with urllib.request.urlopen(req, timeout=timeout or JOBICY_TIMEOUT) as response:
+            raw = response.read()
+            if response.headers.get("Content-Encoding", "").lower() == "gzip":
+                raw = gzip.decompress(raw)
+            return json.loads(raw.decode("utf-8"))
+    except Exception as exc:
+        raise RuntimeError(f"GET {target} failed: {exc}") from exc
 
 
 def post_json(url, payload, headers=None, timeout=120):
@@ -465,6 +476,7 @@ def normalize_jobicy_jobs(data):
         if salary_max is not None:
             salary_max /= 100000
         location = str(raw.get("jobGeo") or "Anywhere").strip()
+        job_level = str(raw.get("jobLevel") or "").strip()
         jobs.append({
             "external_id": "jobicy:" + str(raw.get("id") or raw.get("jobSlug") or url),
             "source": "Jobicy",
@@ -475,7 +487,7 @@ def normalize_jobicy_jobs(data):
             "work_mode": "Remote",
             "salary_min": salary_min,
             "salary_max": salary_max,
-            "experience_min": extract_experience(description),
+            "experience_min": extract_experience(description) or extract_experience(job_level),
             "url": url,
             "description": description or title,
             "employment_type": ", ".join(str(x) for x in (raw.get("jobType") or [])),
@@ -516,37 +528,45 @@ def _jobicy_search_tag(query):
 
 
 def search_jobicy_jobs(query, location="", remote=False):
-    # Jobicy tag is a content keyword filter, not a semantic exact-match search.
-    # Use one strong anchor and let ApplyBot scoring enforce the requested role.
+    """Fetch live Jobicy data and apply requested location matching locally."""
     tag = _jobicy_search_tag(query)
-    params = {"count": JOBICY_COUNT, "tag": tag}
-    geo = _jobicy_geo(location)
-    if remote:
-        params["geo"] = "anywhere"
-    elif geo:
-        params["geo"] = geo
+    location_text = (location or "").strip()
+    geo = _jobicy_geo(location_text)
+    if remote and not geo:
+        geo = "anywhere"
+    base_params = {"count": JOBICY_COUNT, "tag": tag}
+    if geo:
+        base_params["geo"] = geo
+    headers = {}
+    if JOBICY_API_KEY:
+        headers["Authorization"] = f"Bearer {JOBICY_API_KEY}"
     try:
-        data = fetch_json(JOBICY_API_URL, params)
+        data = fetch_json(JOBICY_API_URL, base_params, headers=headers, timeout=JOBICY_TIMEOUT)
         rows = normalize_jobicy_jobs(data)
+        if not rows:
+            fallback_params = {"count": JOBICY_COUNT}
+            if geo:
+                fallback_params["geo"] = geo
+            data = fetch_json(JOBICY_API_URL, fallback_params, headers=headers, timeout=JOBICY_TIMEOUT)
+            rows = normalize_jobicy_jobs(data)
         filtered = []
-        location_value = (location or "").lower()
         for job in rows:
-            hay = (job.get("location") or "").lower()
-            if location_value and not remote:
-                if location_value == "india" and ("apac" in hay or "india" in hay):
-                    pass
-                elif location_value not in hay and "anywhere" not in hay and "remote" not in hay:
-                    continue
             job["_query"] = query
-            filtered.append(job)
+            if location_matches(job, location_text, remote):
+                filtered.append(job)
         return filtered, [], [{
-            "source": "Jobicy", "found": len(filtered), "configured": True,
-            "provider": "Jobicy Public REST API", "tag": tag, "geo": geo or "anywhere"
+            "source": "Jobicy", "found": len(filtered), "raw_found": len(rows),
+            "configured": True,
+            "provider": "Jobicy Commercial API" if JOBICY_API_KEY else "Jobicy Public REST API",
+            "direct_application_urls": bool(JOBICY_API_KEY), "tag": tag,
+            "geo": geo or "anywhere"
         }]
     except Exception as exc:
         return [], [{"source": "Jobicy", "error": str(exc)[:1000]}], [{
-            "source": "Jobicy", "found": 0, "configured": True,
-            "provider": "Jobicy Public REST API", "tag": tag, "geo": geo or "anywhere"
+            "source": "Jobicy", "found": 0, "raw_found": 0, "configured": True,
+            "provider": "Jobicy Commercial API" if JOBICY_API_KEY else "Jobicy Public REST API",
+            "direct_application_urls": bool(JOBICY_API_KEY), "tag": tag,
+            "geo": geo or "anywhere"
         }]
 
 
@@ -669,14 +689,17 @@ def normalize_arbeitnow_jobs(data):
 
 def location_matches(job, location, remote=False):
     requested = (location or "").strip().lower()
-    text = ((job.get("location") or "") + " " + (job.get("description") or "")).lower()
-    if remote and job.get("work_mode", "").lower() == "remote":
-        return True
+    location_text = (job.get("location") or "").lower()
+    description = (job.get("description") or "").lower()
+    text = location_text + " " + description
     if not requested:
-        return True
+        return (not remote) or job.get("work_mode", "").lower() == "remote"
     if requested in {"india", "ind"}:
-        return any(x in text for x in ["india", "indian", "bangalore", "bengaluru", "pune", "hyderabad", "mumbai", "delhi", "noida", "gurugram", "gurgaon", "chennai", "indore"])
-    return requested in text
+        india_terms = ["india", "indian", "bangalore", "bengaluru", "pune", "hyderabad", "mumbai", "delhi", "noida", "gurugram", "gurgaon", "chennai", "indore"]
+        matched = any(x in text for x in india_terms) or "apac" in location_text or "anywhere" in location_text
+        return matched and (not remote or job.get("work_mode", "").lower() == "remote")
+    matched = requested in text or "anywhere" in location_text or "worldwide" in location_text
+    return matched and (not remote or job.get("work_mode", "").lower() == "remote")
 
 
 def search_public_sources(query, location="", remote=False):
@@ -857,10 +880,11 @@ def config_status():
         "candidate_email_configured": bool(CANDIDATE_EMAIL),
         "candidate_phone_configured": bool(CANDIDATE_PHONE),
         "resume_configured": resume_file_path().is_file(),
-        "supported_browser_adapters": ["greenhouse", "lever"],
+        "supported_browser_adapters": ["greenhouse", "lever", "workable", "ashby", "smartrecruiters"],
         "discovery_sources": {
             "Jobicy": True,
-            "Jobicy_provider": "Jobicy Public REST API",
+            "Jobicy_provider": "Jobicy Commercial API" if JOBICY_API_KEY else "Jobicy Public REST API",
+            "Jobicy_direct_application_urls": bool(JOBICY_API_KEY),
             "legacy_sources_enabled": ENABLE_LEGACY_SOURCES,
             "Adzuna": bool(ADZUNA_APP_ID and ADZUNA_APP_KEY),
             "Greenhouse": len(GREENHOUSE_BOARDS),
@@ -918,6 +942,12 @@ def detect_application_adapter(url):
         return "greenhouse"
     if "lever.co" in host:
         return "lever"
+    if "workable.com" in host:
+        return "workable"
+    if "ashbyhq.com" in host:
+        return "ashby"
+    if "smartrecruiters.com" in host:
+        return "smartrecruiters"
     return "unsupported"
 
 
@@ -980,7 +1010,7 @@ def resolve_jobicy_application_url(job_url):
 def submit_with_browser(job, answers):
     application_url = job["url"]
     resolution_message = None
-    if job.get("source") == "Jobicy":
+    if job.get("source") == "Jobicy" and not JOBICY_API_KEY:
         application_url, resolution_message = resolve_jobicy_application_url(job["url"])
         if application_url != job["url"]:
             job = {**job, "url": application_url}
@@ -989,7 +1019,7 @@ def submit_with_browser(job, answers):
         return {"status": "unsupported_source_policy", "adapter": adapter,
                 "message": "Remotive public API terms do not permit submitting its listings to third-party sites. This listing can be reviewed, but ApplyBot will not auto-submit it."}
     if adapter == "unsupported":
-        message = "No supported Greenhouse or Lever employer application URL was found."
+        message = "No supported employer application URL was found."
         if resolution_message:
             message += " " + resolution_message + "."
         return {"status": "unsupported", "adapter": adapter, "message": message}
