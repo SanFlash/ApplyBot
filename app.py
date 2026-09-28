@@ -715,7 +715,14 @@ def config_status():
         "candidate_phone_configured": bool(CANDIDATE_PHONE),
         "resume_configured": resume_file_path().is_file(),
         "supported_browser_adapters": ["greenhouse", "lever"],
-        "note": "Automatic submission uses public application forms. CAPTCHA and login challenges stop the workflow."
+        "discovery_sources": {
+            "Adzuna": bool(ADZUNA_APP_ID and ADZUNA_APP_KEY),
+            "Greenhouse": len(GREENHOUSE_BOARDS),
+            "Lever": len(LEVER_COMPANIES),
+            "Remotive": True,
+            "Arbeitnow": True,
+        },
+        "note": "Discovery uses live APIs where configured. Automatic submission is limited to supported employer ATS forms."
     })
 
 
