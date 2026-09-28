@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>ApplyBot</title>
+<style>
+:root{--bg:#0b1020;--panel:#11182b;--muted:#91a0b8;--text:#f4f7fb;--line:#22304c;--accent:#76a9ff;--good:#39d98a}
+*{box-sizing:border-box}body{margin:0;font-family:Inter,system-ui,-apple-system,Segoe UI,sans-serif;background:linear-gradient(160deg,#090d18,#111a30);color:var(--text)}
+header{padding:22px 5vw;border-bottom:1px solid var(--line);display:flex;justify-content:space-between;align-items:center;position:sticky;top:0;background:#0b1020e8;backdrop-filter:blur(12px);z-index:2}
+.brand{font-size:22px;font-weight:800}.badge{font-size:12px;padding:5px 9px;border:1px solid #31506f;border-radius:99px;color:#bfe0ff}
+.wrap{padding:28px 5vw;max-width:1400px;margin:auto}.grid{display:grid;grid-template-columns:repeat(4,1fr);gap:14px}
+.card{background:linear-gradient(180deg,#131b2f,#0f1627);border:1px solid var(--line);border-radius:16px;padding:18px}.kpi b{font-size:30px;display:block;margin-top:4px}.muted{color:var(--muted)}
+.jobs{margin-top:20px;display:grid;gap:12px}.job{display:grid;grid-template-columns:1.6fr .8fr .6fr .7fr auto;gap:12px;align-items:center}
+.score{font-weight:800;color:var(--good)}button{border:0;border-radius:10px;padding:10px 13px;background:var(--accent);color:#071021;font-weight:700;cursor:pointer}
+button.secondary{background:#202d47;color:#dce8ff}.pill{padding:5px 8px;border-radius:8px;background:#18233a;color:#bdd0ee;font-size:12px;display:inline-block}
+.empty{padding:50px;text-align:center;color:var(--muted)}.modal{position:fixed;inset:0;background:#0009;display:none;align-items:center;justify-content:center;padding:20px;z-index:5}
+.modal.on{display:flex}.modalbox{max-width:980px;width:100%;max-height:90vh;overflow:auto;background:#10192c;border:1px solid var(--line);border-radius:18px;padding:24px}
+.tabs{display:flex;gap:8px;flex-wrap:wrap;margin:15px 0}.tab{background:#1a2740;color:#cfe0fb}.tab.active{background:#76a9ff;color:#071021}
+.pre{white-space:pre-wrap;background:#0a1120;border:1px solid var(--line);padding:14px;border-radius:10px}.actions{display:flex;justify-content:flex-end;gap:8px;margin-top:15px}
+@media(max-width:900px){.grid{grid-template-columns:repeat(2,1fr)}.job{grid-template-columns:1fr 1fr}.job button{grid-column:1/-1;width:100%}}
+@media(max-width:560px){.grid{grid-template-columns:1fr}.wrap{padding:20px 4vw}header{padding:18px 4vw}.brand{font-size:18px}.modalbox{padding:18px}}
+</style>
+</head>
+<body>
+<header><div class="brand">ApplyBot <span class="badge">AI Job Application Assistant</span></div><div class="muted">Human approval required for submission</div></header>
+<main class="wrap">
+<section class="grid">
+<div class="card kpi"><span class="muted">Jobs discovered</span><b id="k1">0</b></div>
+<div class="card kpi"><span class="muted">Ready matches</span><b id="k2">0</b></div>
+<div class="card kpi"><span class="muted">Applications</span><b id="k3">0</b></div>
+<div class="card kpi"><span class="muted">Configured floor</span><b>₹3L</b></div>
+</section>
+<section class="card" style="margin-top:20px">
+<div style="display:flex;justify-content:space-between;gap:12px;align-items:center">
+<div><h2 style="margin:0 0 5px">Application Queue</h2><div class="muted">Imported jobs are evaluated against your profile and rules.</div></div>
+<button class="secondary" onclick="load()">Refresh</button>
+</div>
+<div id="jobs" class="jobs"></div>
+</section>
+</main>
+<div id="modal" class="modal">
+<div class="modalbox">
+<div style="display:flex;justify-content:space-between;gap:12px;align-items:start">
+<div><h2 id="mtitle" style="margin:0">Application draft</h2><div id="mmeta" class="muted"></div></div>
+<button class="secondary" onclick="closeModal()">Close</button>
+</div>
+<div class="tabs"><button class="tab active" onclick="showTab('summary',this)">Summary</button><button class="tab" onclick="showTab('cover',this)">Cover letter</button><button class="tab" onclick="showTab('answers',this)">Questions</button></div>
+<div id="tab-summary"></div><div id="tab-cover" style="display:none"></div><div id="tab-answers" style="display:none"></div>
+<div class="actions"><button class="secondary" onclick="mark('rejected')">Reject</button><button onclick="mark('approved')">Approve for submission</button></div>
+</div>
+</div>
+<script>
+let currentApp=null;
+async function load(){
+ const [jr,ar]=await Promise.all([fetch('/api/jobs').then(r=>r.json()),fetch('/api/applications').then(r=>r.json())]);
+ document.querySelector('#k1').textContent=jr.length;
+ document.querySelector('#k2').textContent=jr.filter(x=>x.status==='ready'||x.status==='application_ready').length;
+ document.querySelector('#k3').textContent=ar.length;
+ const el=document.querySelector('#jobs');
+ if(!jr.length){el.innerHTML='<div class="empty">No jobs imported yet. Use POST /api/jobs/import with jobs from an approved source or ATS.</div>';return}
+ el.innerHTML=jr.map(j=>`<div class="card job"><div><b>${esc(j.title)}</b><div class="muted">${esc(j.company)} · ${esc(j.location||'Location undisclosed')}</div></div><div><span class="pill">${esc(j.work_mode||'Mode unknown')}</span></div><div class="score">${Math.round(j.match_score)}%</div><div>${j.salary_min||j.salary_max?'₹'+(j.salary_min||'')+'–'+(j.salary_max||'')+' LPA':'Salary TBD'}</div><button onclick="prepare(${j.id})">Prepare application</button></div>`).join('')
+}
+async function prepare(id){
+ const x=await fetch('/api/jobs/'+id+'/prepare',{method:'POST'}).then(r=>r.json());
+ if(x.error){alert(x.error);return}
+ currentApp=x;
+ document.querySelector('#mmeta').textContent='Draft ID: '+x.application_id;
+ document.querySelector('#tab-summary').innerHTML='<div class="pre">'+esc(x.summary)+'</div>';
+ document.querySelector('#tab-cover').innerHTML='<div class="pre">'+esc(x.cover_letter)+'</div>';
+ document.querySelector('#tab-answers').innerHTML=Object.entries(x.answers).map(([k,v])=>'<p><b>'+esc(k.replaceAll('_',' '))+'</b></p><div class="pre">'+esc(v)+'</div>').join('');
+ document.querySelector('#modal').classList.add('on');
+ load();
+}
+async function mark(status){
+ if(!currentApp)return;
+ await fetch('/api/applications/'+currentApp.application_id+'/status',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({status})});
+ closeModal(); load();
+}
+function showTab(name,btn){for(const x of ['summary','cover','answers'])document.querySelector('#tab-'+x).style.display=x===name?'block':'none';document.querySelectorAll('.tab').forEach(b=>b.classList.remove('active'));btn.classList.add('active')}
+function closeModal(){document.querySelector('#modal').classList.remove('on')}
+function esc(s){return String(s).replace(/[&<>'"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[c]))}
+load();
+</script>
+</body>
+</html>
