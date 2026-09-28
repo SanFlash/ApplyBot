@@ -160,7 +160,7 @@ def init_db():
               id BIGSERIAL PRIMARY KEY, external_id TEXT UNIQUE NOT NULL, source TEXT NOT NULL,
               title TEXT NOT NULL, company TEXT NOT NULL, location TEXT, work_mode TEXT,
               salary_min DOUBLE PRECISION, salary_max DOUBLE PRECISION, experience_min DOUBLE PRECISION,
-              source_url TEXT, source_url TEXT, url TEXT NOT NULL, description TEXT NOT NULL, discovered_at TEXT NOT NULL,
+              source_url TEXT, url TEXT NOT NULL, description TEXT NOT NULL, discovered_at TEXT NOT NULL,
               match_score DOUBLE PRECISION DEFAULT 0, status TEXT DEFAULT 'new', skip_reason TEXT)""",
             """CREATE TABLE IF NOT EXISTS applications (
               id BIGSERIAL PRIMARY KEY, job_id BIGINT NOT NULL, tailored_summary TEXT,
@@ -175,7 +175,7 @@ def init_db():
               id INTEGER PRIMARY KEY AUTOINCREMENT, external_id TEXT UNIQUE NOT NULL, source TEXT NOT NULL,
               title TEXT NOT NULL, company TEXT NOT NULL, location TEXT, work_mode TEXT,
               salary_min REAL, salary_max REAL, experience_min REAL,
-              url TEXT NOT NULL, description TEXT NOT NULL, discovered_at TEXT NOT NULL,
+              source_url TEXT, url TEXT NOT NULL, description TEXT NOT NULL, discovered_at TEXT NOT NULL,
               match_score REAL DEFAULT 0, status TEXT DEFAULT 'new', skip_reason TEXT)""",
             """CREATE TABLE IF NOT EXISTS applications (
               id INTEGER PRIMARY KEY AUTOINCREMENT, job_id INTEGER NOT NULL, tailored_summary TEXT,
@@ -416,7 +416,7 @@ def normalize_linkedin_jobs(data):
         exp = extract_experience(description + " " + str(_first_value(raw, "experienceLevel", "experience", "yearsOfExperience")).strip())
         if isinstance(raw.get("yearsOfExperience"), list) and raw["yearsOfExperience"]:
             try:
-                exp = float(re.search(r"\\d+(?:\\.\\d+)?", str(raw["yearsOfExperience"][0])).group())
+                exp = float(re.search(r"\d+(?:\.\d+)?", str(raw["yearsOfExperience"][0])).group())
             except Exception:
                 pass
         remote_value = str(_first_value(raw, "isRemote", "remote", "workplaceType", "workplace_type", "workType")).lower()
