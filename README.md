@@ -9,10 +9,7 @@ ApplyBot is designed to reduce repetitive job-search work without fabricating ca
 - SQLite for local development.
 - PostgreSQL/Supabase support through `DATABASE_URL`.
 - Persistent jobs, applications, settings, and feed-source tables.
-- RSS/Atom feed ingestion from permitted job sources.
-- Configurable feed registry.
-- LinkedIn-assisted job search links (no scraping or session cookies).
-- User-assisted job import for jobs found on LinkedIn or other authorized sources.
+- - - - User-assisted job import for jobs found on LinkedIn or other authorized sources.
 - Duplicate protection using stable external IDs.
 - Job fingerprinting support.
 - Salary and experience extraction from descriptions.
@@ -225,94 +222,57 @@ Example:
 
 If salary or experience is omitted, ApplyBot attempts to extract them from the job description.
 
-## Job discovery
+## Job discovery and auto-apply
 
-ApplyBot performs job discovery **inside the application**. The dashboard no longer opens LinkedIn, Google, or another hiring-site search page for discovery.
+ApplyBot is focused on the requested job criteria. It does not use RSS/Atom feeds and does not open LinkedIn or Google as a discovery step.
 
-### Built-in sources
+### Configure your target
 
-1. **Remotive public API** — remote jobs with keyword search.
-2. **Arbeitnow public Job Board API** — public job data aggregated from multiple ATS sources.
-3. **Authorized RSS/Atom feeds** — optional feeds you configure under Job Discovery.
+- Desired role / keywords
+- Location
+- Remote-only preference
+- Minimum match threshold (default 70%)
+- Maximum experience requirement
+- Minimum salary threshold
 
-Remotive documents keyword filtering through its public API and asks integrations to attribute/link the original listing. Its public data may be delayed, so ApplyBot keeps requests bounded rather than continuously polling. Arbeitnow documents its free, no-key job API and notes that its data comes from multiple ATS/job sources. citeturn3search0turn2view0
+### One-click workflow
 
-### In-app workflow
+**Find & Auto-Apply** runs:
 
-Enter:
+1. Fetch matching listings from configured public/authorized job APIs.
+2. Normalize the listings.
+3. Filter by role, location, experience and salary.
+4. Calculate the ApplyBot match score.
+5. Reject anything below your threshold.
+6. Generate application answers for every qualified job.
+7. Put each qualified application into the application workflow.
 
-- **Role / keywords** — e.g. QA Automation Engineer
-- **Location** — e.g. India
-- **Remote only** — optional
+A job below the threshold is never passed to the application workflow.
 
-Then click **Search inside ApplyBot**.
+### Important distinction
 
-The backend:
+The current backend reports `application_ready`, not `submitted`, unless a supported application adapter actually completes a permitted third-party submission.
 
-1. Queries the authorized public job APIs.
-2. Normalizes different source formats into one job model.
-3. Filters by location/remote preference.
-4. Removes duplicate listings.
-5. Extracts salary/experience only when the source format is unambiguous.
-6. Scores each job against the candidate profile.
-7. Stores the results in PostgreSQL/Supabase or SQLite.
-8. Displays the matches directly in **Application Queue**.
-
-Click **Discover & score jobs** to run the same API search plus all enabled RSS/Atom feeds.
+ApplyBot must not claim that an application was submitted when it only prepared the application. Third-party automatic submission requires a supported, authorized application flow. Login challenges, CAPTCHA, session-cookie extraction, anti-bot bypasses and stealth techniques are not used.
 
 ### Discovery API
 
-POST /api/discover/search
+`POST /api/discover/search`
 
 ```json
 {
   "query": "QA Automation Engineer",
   "location": "India",
-  "remote": false
+  "remote": false,
+  "threshold": 70
 }
 ```
 
-The response includes:
+### Automatic qualification
 
-- items_seen
-- new_jobs
-- sources_checked
-- errors
-- scoring results for newly imported jobs
+`POST /api/jobs/{job_id}/auto-apply`
 
-### RSS/Atom feeds
-
-You can still add an authorized company/organization feed:
-
-POST /api/feeds
-
-```json
-{
-  "name": "Example Company Jobs",
-  "url": "https://example.com/jobs/feed.xml",
-  "source_type": "rss"
-}
-```
-
-Then **Discover & score jobs** fetches both the built-in APIs and enabled feeds.
-
-A feed URL must return RSS/Atom XML; a normal careers page or LinkedIn search URL is not a feed.
-
-### Manual job analysis
-
-The **Analyze a job you found** section remains available when you already have a job URL and description. It is an optional fallback, not part of automatic discovery.
-
-### Security / platform boundary
-
-ApplyBot does not:
-
-- collect LinkedIn passwords or session cookies
-- bypass CAPTCHAs
-- use stealth fingerprinting
-- scrape authenticated hiring-platform pages
-- automate activity intended to evade platform controls
-
-Discovery uses documented/public APIs and feeds that permit automated access.
+The endpoint checks the stored match score against the requested threshold before creating the application workflow.
 
 ## Matching rules
 
