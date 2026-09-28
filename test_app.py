@@ -64,3 +64,31 @@ def test_database_initialization_uses_valid_sqlite_identity_columns(tmp_path, mo
     }
     conn.close()
     assert columns["id"] == 1
+
+
+def test_search_links_are_user_initiated(tmp_path, monkeypatch):
+    client = setup_db(tmp_path, monkeypatch)
+    r = client.get("/api/search-links?query=QA%20Automation%20Engineer&location=India&remote=true")
+    assert r.status_code == 200
+    assert "linkedin.com/jobs/search" in r.json["linkedin"]
+    assert "QA+Automation+Engineer" in r.json["linkedin"]
+    assert "f_WT=2" in r.json["linkedin"]
+    assert "does not scrape LinkedIn" in r.json["note"]
+
+
+def test_manual_job_import_from_user_assisted_source(tmp_path, monkeypatch):
+    client = setup_db(tmp_path, monkeypatch)
+    job = {
+        "title": "QA Automation Engineer",
+        "company": "Example",
+        "location": "Indore",
+        "work_mode": "Hybrid",
+        "url": "https://www.linkedin.com/jobs/view/example-123",
+        "description": "QA Automation Engineer, 1 year experience, Playwright, Python, API testing, 4-6 LPA",
+    }
+    r = client.post("/api/jobs/manual", json=job)
+    assert r.status_code == 200
+    assert r.json["imported"] == 1
+    jobs = client.get("/api/jobs").json
+    assert jobs[0]["source"] == "user-assisted"
+    assert jobs[0]["status"] == "ready"
