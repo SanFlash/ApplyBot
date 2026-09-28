@@ -2,8 +2,13 @@ services:
   - type: web
     name: applybot
     env: python
-    buildCommand: pip install -r requirements.txt
-    startCommand: gunicorn -b 0.0.0.0:$PORT app:app
+    buildCommand: pip install --upgrade pip && pip install -r requirements.txt
+    startCommand: gunicorn --bind 0.0.0.0:$PORT --workers 1 --timeout 120 app:app
+    healthCheckPath: /api/health
     envVars:
+      - key: PYTHON_VERSION
+        value: "3.13.3"
       - key: DEBUG
         value: "false"
+      - key: DATABASE_URL
+        sync: false
