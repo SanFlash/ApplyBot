@@ -24,6 +24,9 @@ CANDIDATE_PHONE = os.getenv("CANDIDATE_PHONE", "").strip()
 RESUME_PATH = os.getenv("RESUME_PATH", "").strip()
 ADZUNA_APP_ID = os.getenv("ADZUNA_APP_ID", "").strip()
 ADZUNA_APP_KEY = os.getenv("ADZUNA_APP_KEY", "").strip()
+BRIGHTDATA_API_KEY = os.getenv("BRIGHTDATA_API_KEY", "").strip()
+BRIGHTDATA_DATASET_ID = os.getenv("BRIGHTDATA_LINKEDIN_DATASET_ID", "gd_m487ihp32jtc4ujg45").strip()
+ENABLE_LEGACY_SOURCES = os.getenv("ENABLE_LEGACY_SOURCES", "false").lower() == "true"
 GREENHOUSE_BOARDS = [x.strip() for x in os.getenv("GREENHOUSE_BOARDS", "").split(",") if x.strip()]
 LEVER_COMPANIES = [x.strip() for x in os.getenv("LEVER_COMPANIES", "").split(",") if x.strip()]
 
@@ -372,6 +375,99 @@ def fetch_json(url, params=None):
         return json.loads(response.read().decode("utf-8"))
 
 
+def post_json(url, payload, headers=None, timeout=60):
+    body = json.dumps(payload).encode("utf-8")
+    request_headers = {
+        "User-Agent": "ApplyBot/2.0 (+live LinkedIn job discovery)",
+        "Accept": "application/json",
+        "Content-Type": "application/json",
+    }
+    if headers:
+        request_headers.update(headers)
+    req = urllib.request.Request(url, data=body, headers=request_headers, method="POST")
+    with urllib.request.urlopen(req, timeout=timeout) as response:
+        raw = response.read().decode("utf-8")
+        return json.loads(raw) if raw else {}
+
+
+def _first_value(raw, *keys):
+    for key in keys:
+        value = raw.get(key)
+        if value not in (None, ""):
+            return value
+    return ""
+
+
+def normalize_linkedin_jobs(data):
+    if isinstance(data, list):
+        rows = data
+    elif isinstance(data, dict):
+        rows = data.get("data") or data.get("results") or data.get("items") or data.get("records") or []
+    else:
+        rows = []
+    jobs = []
+    for raw in rows:
+        if not isinstance(raw, dict):
+            continue
+        title = str(_first_value(raw, "job_title", "title", "position", "jobTitle")).strip()
+        company = str(_first_value(raw, "company_name", "company", "companyName", "organization")).strip()
+        location = str(_first_value(raw, "location", "job_location", "jobLocation", "location_name")).strip()
+        description = strip_html(str(_first_value(raw, "job_description", "description", "description_text", "descriptionText", "jobDescription")))
+        url = str(_first_value(raw, "job_url", "jobUrl", "linkedin_url", "linkedinUrl", "url", "apply_url", "applyUrl")).strip()
+        if not title or not company or not url:
+            continue
+        salary_text = str(_first_value(raw, "salary", "salary_range", "salaryRange", "compensation")).strip()
+        smin, smax = extract_salary(description + " " + salary_text)
+        if smin is None and smax is None:
+            smin, smax = parse_salary_text(salary_text)
+        exp = extract_experience(description + " " + str(_first_value(raw, "experience", "experience_level", "seniority")).strip())
+        remote_value = str(_first_value(raw, "remote", "workplace_type", "workplaceType", "work_type")).lower()
+        work_mode = "Remote" if "remote" in remote_value or "remote" in (location + " " + description).lower() else ""
+        external_id = str(_first_value(raw, "job_id", "jobId", "linkedin_job_id", "id")).strip()
+        jobs.append({
+            "external_id": "linkedin:" + (external_id or job_fingerprint({"company": company, "title": title, "url": url})),
+            "source": "LinkedIn",
+            "title": title,
+            "company": company,
+            "location": location,
+            "work_mode": work_mode,
+            "salary_min": smin,
+            "salary_max": smax,
+            "experience_min": exp,
+            "url": url,
+            "description": description or title,
+            "posted_at": str(_first_value(raw, "posted_date", "postedAt", "date_posted", "datePosted")).strip(),
+            "employment_type": str(_first_value(raw, "employment_type", "employmentType", "job_type")).strip(),
+            "seniority": str(_first_value(raw, "seniority_level", "seniority", "experience_level")).strip(),
+        })
+    return jobs
+
+
+def search_linkedin_jobs(query, location="", remote=False):
+    if not BRIGHTDATA_API_KEY:
+        return [], [{"source": "LinkedIn", "error": "BRIGHTDATA_API_KEY is not configured"}], [{"source": "LinkedIn", "found": 0, "configured": False, "provider": "Bright Data"}]
+    filters = [{"name": "job_title", "operator": "includes", "value": query}]
+    if location:
+        filters.append({"name": "location", "operator": "in", "value": [location]})
+    payload = {
+        "dataset_id": BRIGHTDATA_DATASET_ID,
+        "records_limit": 100,
+        "filter": {"operator": "and", "filters": filters},
+    }
+    try:
+        data = post_json("https://api.brightdata.com/datasets/filter", payload,
+                         headers={"Authorization": "Bearer " + BRIGHTDATA_API_KEY}, timeout=90)
+        rows = normalize_linkedin_jobs(data)
+        filtered = []
+        for job in rows:
+            if location_matches(job, location, remote):
+                job["_query"] = query
+                filtered.append(job)
+        return filtered, [], [{"source": "LinkedIn", "found": len(filtered), "configured": True, "provider": "Bright Data"}]
+    except Exception as exc:
+        return [], [{"source": "LinkedIn", "error": str(exc)[:1000]}], [{"source": "LinkedIn", "found": 0, "configured": True, "provider": "Bright Data"}]
+
+
 def normalize_remotive_jobs(data):
     jobs = []
     for raw in data.get("jobs", []):
@@ -502,79 +598,59 @@ def location_matches(job, location, remote=False):
 
 def search_public_sources(query, location="", remote=False):
     query = (query or "").strip() or "QA Automation Engineer"
-    results = []
-    errors = []
-    source_status = []
+    results, errors, source_status = search_linkedin_jobs(query, location, remote)
 
-    if ADZUNA_APP_ID and ADZUNA_APP_KEY:
+    if ENABLE_LEGACY_SOURCES:
+        if ADZUNA_APP_ID and ADZUNA_APP_KEY:
+            try:
+                data = fetch_json("https://api.adzuna.com/v1/api/jobs/in/search/1", {
+                    "app_id": ADZUNA_APP_ID, "app_key": ADZUNA_APP_KEY, "results_per_page": "50",
+                    "what": query, "where": location or "India", "content-type": "application/json", "sort_by": "date",
+                })
+                rows = normalize_adzuna_jobs(data)
+                results.extend(rows)
+                source_status.append({"source": "Adzuna", "found": len(rows), "configured": True})
+            except Exception as exc:
+                errors.append({"source": "Adzuna", "error": str(exc)})
+                source_status.append({"source": "Adzuna", "found": 0, "configured": True})
+        else:
+            source_status.append({"source": "Adzuna", "found": 0, "configured": False})
+        for board in GREENHOUSE_BOARDS:
+            try:
+                rows = normalize_greenhouse_jobs(fetch_json(f"https://boards-api.greenhouse.io/v1/boards/{board}/jobs", {"content": "true"}), board)
+                results.extend(rows)
+                source_status.append({"source": "Greenhouse:" + board, "found": len(rows), "configured": True})
+            except Exception as exc:
+                errors.append({"source": "Greenhouse:" + board, "error": str(exc)})
+        for company in LEVER_COMPANIES:
+            try:
+                rows = normalize_lever_jobs(fetch_json(f"https://api.lever.co/v0/postings/{company}", {"mode": "json"}), company)
+                results.extend(rows)
+                source_status.append({"source": "Lever:" + company, "found": len(rows), "configured": True})
+            except Exception as exc:
+                errors.append({"source": "Lever:" + company, "error": str(exc)})
         try:
-            data = fetch_json(
-                "https://api.adzuna.com/v1/api/jobs/in/search/1",
-                {
-                    "app_id": ADZUNA_APP_ID,
-                    "app_key": ADZUNA_APP_KEY,
-                    "results_per_page": "50",
-                    "what": query,
-                    "where": location or "India",
-                    "content-type": "application/json",
-                    "sort_by": "date",
-                },
-            )
-            rows = normalize_adzuna_jobs(data)
+            rows = normalize_remotive_jobs(fetch_json("https://remotive.com/api/remote-jobs", {"search": query, "limit": "50"}))
             results.extend(rows)
-            source_status.append({"source": "Adzuna", "found": len(rows), "configured": True})
+            source_status.append({"source": "Remotive", "found": len(rows), "configured": True})
         except Exception as exc:
-            errors.append({"source": "Adzuna", "error": str(exc)})
-            source_status.append({"source": "Adzuna", "found": 0, "configured": True})
-    else:
-        source_status.append({"source": "Adzuna", "found": 0, "configured": False})
-
-    for board in GREENHOUSE_BOARDS:
+            errors.append({"source": "Remotive", "error": str(exc)})
         try:
-            data = fetch_json(f"https://boards-api.greenhouse.io/v1/boards/{board}/jobs", {"content": "true"})
-            rows = normalize_greenhouse_jobs(data, board)
-            results.extend(rows)
-            source_status.append({"source": "Greenhouse:" + board, "found": len(rows), "configured": True})
+            arbeit = normalize_arbeitnow_jobs(fetch_json("https://www.arbeitnow.com/api/job-board-api"))
+            q_tokens = tokens(query)
+            for job in arbeit:
+                haystack = (job["title"] + " " + job["description"]).lower()
+                if not q_tokens or sum(1 for token in q_tokens if token in haystack) >= max(1, min(3, len(q_tokens))):
+                    results.append(job)
+            source_status.append({"source": "Arbeitnow", "found": len(arbeit), "configured": True})
         except Exception as exc:
-            errors.append({"source": "Greenhouse:" + board, "error": str(exc)})
+            errors.append({"source": "Arbeitnow", "error": str(exc)})
 
-    for company in LEVER_COMPANIES:
-        try:
-            data = fetch_json(f"https://api.lever.co/v0/postings/{company}", {"mode": "json"})
-            rows = normalize_lever_jobs(data, company)
-            results.extend(rows)
-            source_status.append({"source": "Lever:" + company, "found": len(rows), "configured": True})
-        except Exception as exc:
-            errors.append({"source": "Lever:" + company, "error": str(exc)})
-
-    # Remotive is retained only as a discovery source because its public API
-    # terms prohibit submitting its listings to third-party sites.
-    try:
-        data = fetch_json("https://remotive.com/api/remote-jobs", {"search": query, "limit": "50"})
-        rows = normalize_remotive_jobs(data)
-        results.extend(rows)
-        source_status.append({"source": "Remotive", "found": len(rows), "configured": True})
-    except Exception as exc:
-        errors.append({"source": "Remotive", "error": str(exc)})
-
-    try:
-        data = fetch_json("https://www.arbeitnow.com/api/job-board-api")
-        arbeit = normalize_arbeitnow_jobs(data)
-        q_tokens = tokens(query)
-        for job in arbeit:
-            haystack = ((job["title"] + " " + job["description"]).lower())
-            if not q_tokens or sum(1 for token in q_tokens if token in haystack) >= max(1, min(3, len(q_tokens))):
-                results.append(job)
-        source_status.append({"source": "Arbeitnow", "found": len(arbeit), "configured": True})
-    except Exception as exc:
-        errors.append({"source": "Arbeitnow", "error": str(exc)})
-
-    filtered = []
-    seen = set()
+    filtered, seen = [], set()
     for job in results:
         if not job.get("title") or not job.get("company") or not job.get("url"):
             continue
-        if not location_matches(job, location, remote):
+        if location and not location_matches(job, location, remote):
             continue
         key = job.get("external_id") or job_fingerprint(job)
         if key in seen:
@@ -582,7 +658,6 @@ def search_public_sources(query, location="", remote=False):
         seen.add(key)
         job["_query"] = query
         filtered.append(job)
-
     return filtered, errors, source_status
 
 def import_job_items(items):
@@ -716,11 +791,14 @@ def config_status():
         "resume_configured": resume_file_path().is_file(),
         "supported_browser_adapters": ["greenhouse", "lever"],
         "discovery_sources": {
+            "LinkedIn": bool(BRIGHTDATA_API_KEY),
+            "LinkedIn_provider": "Bright Data",
+            "legacy_sources_enabled": ENABLE_LEGACY_SOURCES,
             "Adzuna": bool(ADZUNA_APP_ID and ADZUNA_APP_KEY),
             "Greenhouse": len(GREENHOUSE_BOARDS),
             "Lever": len(LEVER_COMPANIES),
-            "Remotive": True,
-            "Arbeitnow": True,
+            "Remotive": ENABLE_LEGACY_SOURCES,
+            "Arbeitnow": ENABLE_LEGACY_SOURCES,
         },
         "note": "Discovery uses live APIs where configured. Automatic submission is limited to supported employer ATS forms."
     })
@@ -897,187 +975,3 @@ def submit_with_browser(job, answers):
     except Exception as exc:
         return {"status": "failed", "adapter": adapter, "message": str(exc)[:1000]}
 
-
-def auto_apply_job(job_id, threshold=70, max_experience=2, min_salary=3):
-    c = db()
-    r = c.execute("SELECT * FROM jobs WHERE id=?", (job_id,)).fetchone()
-    if not r:
-        c.close()
-        return {"ok": False, "error": "job not found"}
-    job = dict(r)
-    score = float(job.get("match_score") or 0)
-    if score < float(threshold):
-        c.close()
-        return {"ok": False, "status": "below_threshold", "score": score, "threshold": threshold}
-    max_experience = float(max_experience)
-    min_salary = max(float(min_salary), CANDIDATE["minimum_ctc_lpa"])
-    if job.get("experience_min") is not None and float(job["experience_min"]) > max_experience:
-        c.close()
-        return {"ok": False, "status": "experience_filter", "message": "Job exceeds the configured maximum experience requirement."}
-    if job.get("salary_max") is not None and float(job["salary_max"]) < min_salary:
-        c.close()
-        return {"ok": False, "status": "salary_filter", "message": "Job is below the configured minimum salary requirement."}
-
-    answers = make_answers(job)
-    answers["cover_letter"] = (
-        "Dear Hiring Team,\n\n"
-        + "I am excited to apply for the " + job["title"] + " position at " + job["company"] + ". "
-        + "I bring hands-on QA experience across manual testing, web automation, mobile automation, API validation, "
-        + "SQL/database testing and end-to-end quality assurance. My automation work includes Playwright, "
-        + "JavaScript/TypeScript, Page Object Model and Appium.\n\nRegards,\nSatyendra Kumar Namdeo"
-    )
-
-    if AUTO_APPLY_ENABLED:
-        result = submit_with_browser(job, answers)
-    else:
-        result = {
-            "status": "application_ready",
-            "adapter": detect_application_adapter(job["url"]),
-            "message": "Auto-apply is disabled; application data was prepared but not submitted."
-        }
-
-    now = utcnow()
-    status = result["status"]
-    if status == "submitted":
-        stored_status, submitted_at = "applied", now
-    elif status in {"requires_user_action", "requires_configuration", "failed", "unsupported", "unsupported_source_policy"}:
-        stored_status, submitted_at = status, None
-    else:
-        stored_status, submitted_at = "approved", None
-
-    if c.pg:
-        cur = c.execute(
-            """INSERT INTO applications(
-                job_id,tailored_summary,cover_letter,answers_json,status,adapter,
-                submission_id,submission_message,submitted_at,created_at,updated_at
-            ) VALUES(?,?,?,?,?,?,?,?,?,?,?) RETURNING id""",
-            (
-                job_id, answers["why_hire"], answers["cover_letter"], json.dumps(answers),
-                stored_status, result.get("adapter"), result.get("submission_id"),
-                result.get("message"), submitted_at, now, now
-            ),
-        )
-        aid = cur.fetchone()["id"]
-    else:
-        cur = c.execute(
-            """INSERT INTO applications(
-                job_id,tailored_summary,cover_letter,answers_json,status,adapter,
-                submission_id,submission_message,submitted_at,created_at,updated_at
-            ) VALUES(?,?,?,?,?,?,?,?,?,?,?)""",
-            (
-                job_id, answers["why_hire"], answers["cover_letter"], json.dumps(answers),
-                stored_status, result.get("adapter"), result.get("submission_id"),
-                result.get("message"), submitted_at, now, now
-            ),
-        )
-        aid = cur.lastrowid
-
-    job_status = "applied" if status == "submitted" else (
-        "application_ready" if status == "application_ready" else status
-    )
-    c.execute("UPDATE jobs SET status=? WHERE id=?", (job_status, job_id))
-    c.commit()
-    c.close()
-    return {
-        "ok": status not in {"failed", "below_threshold", "unsupported_source_policy"},
-        "status": status,
-        "application_id": aid,
-        "job_id": job_id,
-        "job_url": job["url"],
-        "source": job["source"],
-        "score": score,
-        "adapter": result.get("adapter"),
-        "message": result.get("message"),
-        "submitted": status == "submitted",
-    }
-
-@app.post("/api/jobs/<int:job_id>/auto-apply")
-def auto_apply(job_id):
-    body = request.get_json(silent=True) or {}
-    result = auto_apply_job(
-        job_id,
-        float(body.get("threshold", 70)),
-        float(body.get("max_experience", 2)),
-        float(body.get("min_salary", 3)),
-    )
-    return jsonify(result)
-
-
-@app.post("/api/jobs/<int:job_id>/prepare")
-def prepare(job_id):
-    c = db()
-    r = c.execute("SELECT * FROM jobs WHERE id=?", (job_id,)).fetchone()
-    if not r:
-        c.close()
-        return jsonify({"error": "job not found"}), 404
-    j = dict(r)
-    answers = make_answers(j)
-    summary = (
-        "QA Engineer with ~1 year of hands-on experience in manual and automation testing across web and mobile products. "
-        "Strong practical experience with Playwright, JavaScript/TypeScript, Page Object Model, Appium for Android/iOS, "
-        "REST API validation, SQL/database testing, cross-browser/device testing, and AI-assisted QA workflows."
-    )
-    cover = f"""Dear Hiring Team,
-
-I am excited to apply for the {j['title']} position at {j['company']}. I currently work as a QA Engineer with hands-on experience across manual testing, web automation, mobile automation, API validation, database testing and end-to-end quality assurance.
-
-My strongest automation experience is with Playwright using JavaScript/TypeScript and Page Object Model, along with Appium for Android and iOS testing. I also use AI-assisted workflows to accelerate test design, automation scripting, debugging and edge-case analysis while keeping human validation in the loop.
-
-I would welcome the opportunity to bring this practical QA and automation mindset to your team.
-
-Regards,
-Satyendra Kumar Namdeo"""
-    now = utcnow()
-    if c.pg:
-        cur = c.execute(
-            "INSERT INTO applications(job_id,tailored_summary,cover_letter,answers_json,status,created_at,updated_at) "
-            "VALUES(?,?,?,?,?,?,?) RETURNING id",
-            (job_id, summary, cover, json.dumps(answers), "draft", now, now),
-        )
-        aid = cur.fetchone()["id"]
-    else:
-        cur = c.execute(
-            "INSERT INTO applications(job_id,tailored_summary,cover_letter,answers_json,status,created_at,updated_at) VALUES(?,?,?,?,?,?,?)",
-            (job_id, summary, cover, json.dumps(answers), "draft", now, now),
-        )
-        aid = cur.lastrowid
-    c.execute("UPDATE jobs SET status=? WHERE id=?", ("application_ready", job_id))
-    c.commit()
-    c.close()
-    return jsonify({"application_id": aid, "summary": summary, "cover_letter": cover, "answers": answers})
-
-
-@app.get("/api/applications")
-def applications():
-    c = db()
-    rows = c.execute(
-        """SELECT a.*,j.title,j.company,j.location,j.url,j.match_score
-        FROM applications a JOIN jobs j ON j.id=a.job_id ORDER BY a.created_at DESC"""
-    ).fetchall()
-    c.close()
-    return jsonify([dict(r) for r in rows])
-
-
-@app.post("/api/applications/<int:app_id>/status")
-def app_status(app_id):
-    status = (request.get_json(silent=True) or {}).get("status")
-    allowed = {"draft", "approved", "applied", "rejected", "interview", "offer", "closed"}
-    if status not in allowed:
-        return jsonify({"error": "invalid status"}), 400
-    c = db()
-    c.execute("UPDATE applications SET status=?,updated_at=? WHERE id=?", (status, utcnow(), app_id))
-    c.commit()
-    c.close()
-    return {"ok": True, "status": status}
-
-
-@app.cli.command("init-db")
-def init_command():
-    init_db()
-    print("ApplyBot database initialized.")
-
-
-init_db()
-
-if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=int(os.getenv("PORT", "8000")), debug=os.getenv("DEBUG", "false").lower() == "true")
