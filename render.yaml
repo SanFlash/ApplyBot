@@ -20,6 +20,12 @@ services:
         sync: false
       - key: CANDIDATE_PHONE
         sync: false
+      - key: BRIGHTDATA_API_KEY
+        sync: false
+      - key: BRIGHTDATA_LINKEDIN_DATASET_ID
+        value: "gd_m487ihp32jtc4ujg45"
+      - key: ENABLE_LEGACY_SOURCES
+        value: "false"
       - key: ADZUNA_APP_ID
         sync: false
       - key: ADZUNA_APP_KEY
