@@ -107,35 +107,64 @@ def db():
 
 def init_db():
     c = db()
-    statements = [
-        """CREATE TABLE IF NOT EXISTS jobs (
-          id %s, external_id TEXT UNIQUE NOT NULL, source TEXT NOT NULL,
-          title TEXT NOT NULL, company TEXT NOT NULL, location TEXT, work_mode TEXT,
-          salary_min REAL, salary_max REAL, experience_min REAL, url TEXT NOT NULL, description TEXT NOT NULL,
-          discovered_at TEXT NOT NULL, match_score REAL DEFAULT 0, status TEXT DEFAULT 'new', skip_reason TEXT)"""
-        % ("INTEGER PRIMARY KEY AUTOINCREMENT" if not c.pg else "BIGSERIAL PRIMARY KEY"),
-        """CREATE TABLE IF NOT EXISTS applications (
-          id %s, job_id INTEGER NOT NULL, tailored_summary TEXT,
-          cover_letter TEXT, answers_json TEXT, status TEXT NOT NULL DEFAULT 'draft',
-          created_at TEXT NOT NULL, updated_at TEXT NOT NULL)"""
-        % (" AUTOINCREMENT" if not c.pg else ""),
-        """CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL)""",
-        """CREATE TABLE IF NOT EXISTS feed_sources (
-          id INTEGER PRIMARY KEY%s, name TEXT NOT NULL, url TEXT UNIQUE NOT NULL,
-          source_type TEXT NOT NULL DEFAULT 'rss', enabled INTEGER NOT NULL DEFAULT 1,
-          created_at TEXT NOT NULL)""" % (" AUTOINCREMENT" if not c.pg else ""),
-    ]
+
+    if c.pg:
+        statements = [
+            """CREATE TABLE IF NOT EXISTS jobs (
+              id BIGSERIAL PRIMARY KEY, external_id TEXT UNIQUE NOT NULL, source TEXT NOT NULL,
+              title TEXT NOT NULL, company TEXT NOT NULL, location TEXT, work_mode TEXT,
+              salary_min DOUBLE PRECISION, salary_max DOUBLE PRECISION, experience_min DOUBLE PRECISION,
+              url TEXT NOT NULL, description TEXT NOT NULL, discovered_at TEXT NOT NULL,
+              match_score DOUBLE PRECISION DEFAULT 0, status TEXT DEFAULT 'new', skip_reason TEXT)""",
+            """CREATE TABLE IF NOT EXISTS applications (
+              id BIGSERIAL PRIMARY KEY, job_id BIGINT NOT NULL, tailored_summary TEXT,
+              cover_letter TEXT, answers_json TEXT, status TEXT NOT NULL DEFAULT 'draft',
+              created_at TEXT NOT NULL, updated_at TEXT NOT NULL)""",
+            """CREATE TABLE IF NOT EXISTS settings (
+              key TEXT PRIMARY KEY, value TEXT NOT NULL)""",
+            """CREATE TABLE IF NOT EXISTS feed_sources (
+              id BIGSERIAL PRIMARY KEY, name TEXT NOT NULL, url TEXT UNIQUE NOT NULL,
+              source_type TEXT NOT NULL DEFAULT 'rss', enabled BOOLEAN NOT NULL DEFAULT TRUE,
+              created_at TEXT NOT NULL)""",
+        ]
+    else:
+        statements = [
+            """CREATE TABLE IF NOT EXISTS jobs (
+              id INTEGER PRIMARY KEY AUTOINCREMENT, external_id TEXT UNIQUE NOT NULL, source TEXT NOT NULL,
+              title TEXT NOT NULL, company TEXT NOT NULL, location TEXT, work_mode TEXT,
+              salary_min REAL, salary_max REAL, experience_min REAL,
+              url TEXT NOT NULL, description TEXT NOT NULL, discovered_at TEXT NOT NULL,
+              match_score REAL DEFAULT 0, status TEXT DEFAULT 'new', skip_reason TEXT)""",
+            """CREATE TABLE IF NOT EXISTS applications (
+              id INTEGER PRIMARY KEY AUTOINCREMENT, job_id INTEGER NOT NULL, tailored_summary TEXT,
+              cover_letter TEXT, answers_json TEXT, status TEXT NOT NULL DEFAULT 'draft',
+              created_at TEXT NOT NULL, updated_at TEXT NOT NULL)""",
+            """CREATE TABLE IF NOT EXISTS settings (
+              key TEXT PRIMARY KEY, value TEXT NOT NULL)""",
+            """CREATE TABLE IF NOT EXISTS feed_sources (
+              id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, url TEXT UNIQUE NOT NULL,
+              source_type TEXT NOT NULL DEFAULT 'rss', enabled INTEGER NOT NULL DEFAULT 1,
+              created_at TEXT NOT NULL)""",
+        ]
+
     for statement in statements:
         c.execute(statement)
-    c.execute(
-        "INSERT INTO settings(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=?"
-        if c.pg else
-        "INSERT OR REPLACE INTO settings(key,value) VALUES(?,?)",
-        ("candidate", json.dumps(CANDIDATE), json.dumps(CANDIDATE)) if c.pg else ("candidate", json.dumps(CANDIDATE))
-    )
+
+    candidate_json = json.dumps(CANDIDATE)
+    if c.pg:
+        c.execute(
+            "INSERT INTO settings(key,value) VALUES(?,?) "
+            "ON CONFLICT(key) DO UPDATE SET value=EXCLUDED.value",
+            ("candidate", candidate_json),
+        )
+    else:
+        c.execute(
+            "INSERT OR REPLACE INTO settings(key,value) VALUES(?,?)",
+            ("candidate", candidate_json),
+        )
+
     c.commit()
     c.close()
-
 
 def tokens(text):
     return {
