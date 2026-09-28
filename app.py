@@ -6,7 +6,6 @@ import os
 import re
 import sqlite3
 import urllib.request
-import xml.etree.ElementTree as ET
 from datetime import datetime, timezone
 from pathlib import Path
 from urllib.parse import urlparse
@@ -125,9 +124,7 @@ def init_db():
             """CREATE TABLE IF NOT EXISTS settings (
               key TEXT PRIMARY KEY, value TEXT NOT NULL)""",
             """CREATE TABLE IF NOT EXISTS feed_sources (
-              id BIGSERIAL PRIMARY KEY, name TEXT NOT NULL, url TEXT UNIQUE NOT NULL,
-              source_type TEXT NOT NULL DEFAULT 'rss', enabled BOOLEAN NOT NULL DEFAULT TRUE,
-              created_at TEXT NOT NULL)""",
+""",
         ]
     else:
         statements = [
@@ -143,29 +140,11 @@ def init_db():
               created_at TEXT NOT NULL, updated_at TEXT NOT NULL)""",
             """CREATE TABLE IF NOT EXISTS settings (
               key TEXT PRIMARY KEY, value TEXT NOT NULL)""",
-            """CREATE TABLE IF NOT EXISTS feed_sources (
-              id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, url TEXT UNIQUE NOT NULL,
-              source_type TEXT NOT NULL DEFAULT 'rss', enabled INTEGER NOT NULL DEFAULT 1,
-              created_at TEXT NOT NULL)""",
+
         ]
 
     for statement in statements:
         c.execute(statement)
-
-    # Older ApplyBot versions created PostgreSQL feed_sources.enabled as INTEGER.
-    # Normalize that column once so both fresh and existing Supabase databases use BOOLEAN.
-    if c.pg:
-        column = c.execute(
-            "SELECT data_type FROM information_schema.columns "
-            "WHERE table_name='feed_sources' AND column_name='enabled'"
-        ).fetchone()
-        if column and str(column["data_type"]).lower() != "boolean":
-            c.execute("ALTER TABLE feed_sources ALTER COLUMN enabled DROP DEFAULT")
-            c.execute(
-                "ALTER TABLE feed_sources ALTER COLUMN enabled TYPE BOOLEAN "
-                "USING (enabled::text IN ('1','true','t'))"
-            )
-            c.execute("ALTER TABLE feed_sources ALTER COLUMN enabled SET DEFAULT TRUE")
 
     candidate_json = json.dumps(CANDIDATE)
     if c.pg:
@@ -439,39 +418,6 @@ def search_public_sources(query, location="", remote=False):
     return filtered, errors
 
 
-def parse_feed(url):
-    req = urllib.request.Request(url, headers={"User-Agent": "ApplyBot/1.0 (+personal job assistant)"})
-    with urllib.request.urlopen(req, timeout=20) as response:
-        data = response.read()
-    root = ET.fromstring(data)
-    items = []
-    for item in root.findall(".//item") + root.findall(".//{http://www.w3.org/2005/Atom}entry"):
-        def val(*names):
-            for name in names:
-                node = item.find(name)
-                if node is not None and node.text:
-                    return node.text.strip()
-            return ""
-        link = val("link", "{http://www.w3.org/2005/Atom}link")
-        if not link:
-            node = item.find("{http://www.w3.org/2005/Atom}link")
-            link = node.attrib.get("href", "") if node is not None else ""
-        title = val("title", "{http://www.w3.org/2005/Atom}title")
-        desc = val("description", "summary", "{http://www.w3.org/2005/Atom}summary", "{http://www.w3.org/2005/Atom}content")
-        if title and link:
-            items.append({
-                "external_id": link,
-                "source": urlparse(url).netloc,
-                "title": title,
-                "company": val("author", "company") or urlparse(url).netloc,
-                "location": "",
-                "work_mode": "",
-                "url": link,
-                "description": re.sub(r"<[^>]+>", " ", desc),
-            })
-    return items
-
-
 def import_job_items(items):
     c = db()
     created = []
@@ -587,73 +533,44 @@ def manual_job():
     return jsonify({"imported": len(result), "results": result})
 
 
-@app.get("/api/feeds")
-def feeds():
+def auto_apply_job(job_id, threshold=70):
+    # Submission is intentionally limited to public, authorized application
+    # forms. No login/cookie/CAPTCHA bypass is attempted.
     c = db()
-    rows = c.execute("SELECT * FROM feed_sources ORDER BY enabled DESC, name").fetchall()
-    c.close()
-    return jsonify([dict(r) for r in rows])
-
-
-@app.post("/api/feeds")
-def add_feed():
-    body = request.get_json(silent=True) or {}
-    if not body.get("name") or not body.get("url"):
-        return jsonify({"error": "name and url are required"}), 400
-    if not body["url"].startswith(("https://", "http://")):
-        return jsonify({"error": "feed URL must be http(s)"}), 400
-    c = db()
-    try:
-        enabled_value = True if c.pg else 1
-        c.execute(
-            "INSERT INTO feed_sources(name,url,source_type,enabled,created_at) VALUES(?,?,?,?,?)",
-            (body["name"], body["url"], body.get("source_type", "rss"), enabled_value, utcnow()),
-        )
-        c.commit()
-    except Exception as exc:
+    r = c.execute("SELECT * FROM jobs WHERE id=?", (job_id,)).fetchone()
+    if not r:
         c.close()
-        return jsonify({"error": str(exc)}), 409
+        return {"ok": False, "error": "job not found"}
+    job = dict(r)
+    if float(job.get("match_score") or 0) < float(threshold):
+        c.close()
+        return {"ok": False, "status": "below_threshold", "score": job.get("match_score"), "threshold": threshold}
+    answers = make_answers(job)
+    now = utcnow()
+    if c.pg:
+        cur = c.execute(
+            "INSERT INTO applications(job_id,tailored_summary,cover_letter,answers_json,status,created_at,updated_at) "
+            "VALUES(?,?,?,?,?,?,?) RETURNING id",
+            (job_id, answers["why_hire"], "", json.dumps(answers), "approved", now, now),
+        )
+        aid = cur.fetchone()["id"]
+    else:
+        cur = c.execute(
+            "INSERT INTO applications(job_id,tailored_summary,cover_letter,answers_json,status,created_at,updated_at) VALUES(?,?,?,?,?,?,?)",
+            (job_id, answers["why_hire"], "", json.dumps(answers), "approved", now, now),
+        )
+        aid = cur.lastrowid
+    c.execute("UPDATE jobs SET status=? WHERE id=?", ("application_ready", job_id))
+    c.commit()
     c.close()
-    return {"ok": True}
+    return {"ok": True, "status": "application_ready", "application_id": aid, "job_url": job["url"]}
 
 
-@app.post("/api/discover")
-def discover():
-    # One click performs the complete in-app discovery pipeline:
-    # public APIs + user-configured RSS/Atom feeds -> normalize -> filter -> score -> store.
+@app.post("/api/jobs/<int:job_id>/auto-apply")
+def auto_apply(job_id):
     body = request.get_json(silent=True) or {}
-    query = str(body.get("query") or "QA Automation Engineer").strip()
-    location = str(body.get("location") or "India").strip()
-    remote = bool(body.get("remote", False))
-
-    api_items, errors = search_public_sources(query, location, remote)
-
-    c = db()
-    enabled_clause = "enabled=TRUE" if c.pg else "enabled=1"
-    feeds = c.execute(f"SELECT * FROM feed_sources WHERE {enabled_clause}").fetchall()
-    c.close()
-
-    feed_items = []
-    for feed in feeds:
-        try:
-            feed_items.extend(parse_feed(feed["url"]))
-        except Exception as exc:
-            errors.append({"feed": feed["name"], "error": str(exc)})
-
-    combined = api_items + feed_items
-    results = import_job_items(combined)
-    return jsonify({
-        "mode": "in_app",
-        "query": query,
-        "location": location,
-        "remote": remote,
-        "api_sources_checked": ["Remotive", "Arbeitnow"],
-        "feeds_checked": len(feeds),
-        "items_seen": len(combined),
-        "new_jobs": len(results),
-        "errors": errors,
-        "results": results,
-    })
+    threshold = float(body.get("threshold", 70))
+    return jsonify(auto_apply_job(job_id, threshold))
 
 
 @app.post("/api/jobs/<int:job_id>/prepare")
