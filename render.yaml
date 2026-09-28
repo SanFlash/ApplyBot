@@ -3,7 +3,7 @@ services:
     name: applybot
     env: python
     buildCommand: pip install --upgrade pip && pip install -r requirements.txt && playwright install chromium
-    startCommand: gunicorn --bind 0.0.0.0:$PORT --workers 1 --timeout 120 app:app
+    startCommand: gunicorn --bind 0.0.0.0:$PORT --workers 1 --timeout 240 app:app
     healthCheckPath: /api/health
     envVars:
       - key: PYTHON_VERSION
