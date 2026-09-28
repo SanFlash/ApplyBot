@@ -111,7 +111,7 @@ async function loadJobs(){
 async function loadHistory(){
  const apps=await fetch('/api/applications').then(r=>r.json());
  $('kSubmitted').textContent=apps.filter(a=>a.status==='applied').length;
- $('kAction').textContent=apps.filter(a=>['requires_user_action','requires_configuration','failed','unsupported'].includes(a.status)).length;
+ $('kAction').textContent=apps.filter(a=>['requires_user_action','requires_configuration','failed','unsupported','unsupported_source_policy'].includes(a.status)).length;
  $('history').innerHTML=apps.length?apps.map(a=>'<div class="historyrow"><div><b>'+esc(a.title)+'</b><br>'+esc(a.company)+'</div><div>'+esc(a.status)+'</div><div>'+esc(a.adapter||'—')+'</div><div>'+esc(a.submission_message||'—')+'</div></div>').join(''):'<div class="empty">No application attempts yet.</div>';
 }
 async function loadAll(){await Promise.all([loadConfig(),loadJobs(),loadHistory()])}
