@@ -113,9 +113,9 @@ def init_db():
           title TEXT NOT NULL, company TEXT NOT NULL, location TEXT, work_mode TEXT,
           salary_min REAL, salary_max REAL, experience_min REAL, url TEXT NOT NULL, description TEXT NOT NULL,
           discovered_at TEXT NOT NULL, match_score REAL DEFAULT 0, status TEXT DEFAULT 'new', skip_reason TEXT)"""
-        % (" AUTOINCREMENT" if not c.pg else ""),
+        % ("INTEGER PRIMARY KEY AUTOINCREMENT" if not c.pg else "BIGSERIAL PRIMARY KEY"),
         """CREATE TABLE IF NOT EXISTS applications (
-          id INTEGER PRIMARY KEY%s, job_id INTEGER NOT NULL, tailored_summary TEXT,
+          id %s, job_id INTEGER NOT NULL, tailored_summary TEXT,
           cover_letter TEXT, answers_json TEXT, status TEXT NOT NULL DEFAULT 'draft',
           created_at TEXT NOT NULL, updated_at TEXT NOT NULL)"""
         % (" AUTOINCREMENT" if not c.pg else ""),
