@@ -2,7 +2,7 @@ services:
   - type: web
     name: applybot
     env: python
-    buildCommand: pip install --upgrade pip && pip install -r requirements.txt
+    buildCommand: pip install --upgrade pip && pip install -r requirements.txt && playwright install chromium
     startCommand: gunicorn --bind 0.0.0.0:$PORT --workers 1 --timeout 120 app:app
     healthCheckPath: /api/health
     envVars:
@@ -11,4 +11,14 @@ services:
       - key: DEBUG
         value: "false"
       - key: DATABASE_URL
+        sync: false
+      - key: AUTO_APPLY_ENABLED
+        value: "false"
+      - key: AUTO_APPLY_MAX
+        value: "3"
+      - key: CANDIDATE_EMAIL
+        sync: false
+      - key: CANDIDATE_PHONE
+        sync: false
+      - key: RESUME_PATH
         sync: false
