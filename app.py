@@ -509,24 +509,49 @@ def search_links():
     return jsonify(build_search_links(query, location, remote))
 
 
-@app.post("/api/discover/search")
-def discover_search():
-    body = request.get_json(silent=True) or {}
+def run_discovery(body):
     query = str(body.get("query") or "QA Automation Engineer").strip()
     location = str(body.get("location") or "India").strip()
     remote = bool(body.get("remote", False))
+    threshold = float(body.get("threshold", 70))
     items, errors = search_public_sources(query, location, remote)
     results = import_job_items(items)
-    return jsonify({
+    qualified = [r for r in results if float(r.get("score") or 0) >= threshold]
+    return {
         "mode": "in_app",
         "query": query,
         "location": location,
         "remote": remote,
+        "threshold": threshold,
         "sources_checked": ["Remotive", "Arbeitnow"],
         "items_seen": len(items),
         "new_jobs": len(results),
+        "qualified_jobs": len(qualified),
         "errors": errors,
         "results": results,
+    }
+
+
+@app.post("/api/discover/search")
+def discover_search():
+    return jsonify(run_discovery(request.get_json(silent=True) or {}))
+
+
+@app.post("/api/discover")
+def discover():
+    return jsonify(run_discovery(request.get_json(silent=True) or {}))
+
+
+@app.get("/api/config")
+def config_status():
+    return jsonify({
+        "auto_apply_enabled": AUTO_APPLY_ENABLED,
+        "auto_apply_max": AUTO_APPLY_MAX,
+        "candidate_email_configured": bool(CANDIDATE_EMAIL),
+        "candidate_phone_configured": bool(CANDIDATE_PHONE),
+        "resume_configured": bool(RESUME_PATH and Path(RESUME_PATH).exists()),
+        "supported_browser_adapters": ["greenhouse", "lever"],
+        "note": "Automatic submission uses public application forms. CAPTCHA and login challenges stop the workflow."
     })
 
 
