@@ -231,7 +231,7 @@ ApplyBot now supports **three practical discovery paths**.
 
 ### 1. LinkedIn-assisted search
 
-The dashboard's **Search LinkedIn** button builds a normal LinkedIn Jobs search URL from your criteria:
+The dashboard's **In-app job search** button builds a normal LinkedIn Jobs search URL from your criteria:
 
 - Role / keywords
 - Location
@@ -365,7 +365,7 @@ Company ATS platforms or job boards may expose feeds or APIs. Use only sources w
 8. ApplyBot imports and scores the jobs
 ```
 
-**Important:** `https://www.linkedin.com/jobs/search/...` is a search page, not an RSS feed. Use the **Search LinkedIn** button in ApplyBot instead, then use **Analyze a job you found** for jobs you want to evaluate.
+**Important:** `https://www.linkedin.com/jobs/search/...` is a search page, not an RSS feed. Use the **In-app job search** button in ApplyBot instead, then use **Analyze a job you found** for jobs you want to evaluate.
 
 ### 3. Authorized RSS/Atom feeds
 
@@ -617,7 +617,7 @@ For your current job search, use this sequence:
 ```
 1. Enter role + location
         ↓
-2. Search LinkedIn
+2. In-app job search
         ↓
 3. Open a suitable job
         ↓
