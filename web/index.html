@@ -95,7 +95,7 @@ function jobCard(j){
   : '<button class="secondary" disabled>Not qualified</button>';
  return '<div class="card job">'+
   '<div><div class="title">'+esc(j.title)+'</div><div class="jobmeta">'+esc(j.company)+' · '+esc(j.location||'Location undisclosed')+'</div>'+
-  '<div class="jobmeta source">Source: '+esc(j.source||'unknown')+'</div><div class="jobmeta">Jobicy listing: <a href="'+esc(j.source_url||j.url)+'" target="_blank" rel="noopener" style="color:#9ec6ff">'+esc(j.source_url||j.url)+'</a></div><div class="jobmeta">Resolved application: <a href="'+esc(j.url)+'" target="_blank" rel="noopener" style="color:#9ec6ff">'+esc(j.url)+'</a></div>'+
+  '<div class="jobmeta source">Source: '+esc(j.source||'unknown')+'</div><div class="jobmeta">'+(j.source==='Jobicy'?'Jobicy listing':'Listing URL')+': <a href="'+esc(j.source_url||j.url)+'" target="_blank" rel="noopener" style="color:#9ec6ff">'+esc(j.source_url||j.url)+'</a></div><div class="jobmeta">'+(j.source==='Jobicy'?'Application URL':'Source URL')+': <a href="'+esc(j.url)+'" target="_blank" rel="noopener" style="color:#9ec6ff">'+esc(j.url)+'</a></div>'+
   '<details><summary>Why this result?</summary><div class="reason">'+reasons+'</div><div class="skills">'+skills+'</div></details></div>'+
   '<div><span class="pill">'+esc(j.status)+'</span><div class="jobmeta">Adapter: '+esc(adapterFor(j.url))+'</div></div>'+
   '<div class="score">'+Math.round(Number(j.match_score||0))+'%</div>'+
