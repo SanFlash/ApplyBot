@@ -1,11 +1,10 @@
 <!doctype html>
 <html lang="en">
 <head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>ApplyBot</title>
 <style>
-:root{--bg:#0b1020;--panel:#11182b;--muted:#91a0b8;--text:#f4f7fb;--line:#22304c;--accent:#76a9ff;--good:#39d98a}
+:root{--bg:#0b1020;--panel:#11182b;--muted:#91a0b8;--text:#f4f7fb;--line:#22304c;--accent:#76a9ff;--good:#39d98a;--warn:#ffc857}
 *{box-sizing:border-box}body{margin:0;font-family:Inter,system-ui,-apple-system,Segoe UI,sans-serif;background:linear-gradient(160deg,#090d18,#111a30);color:var(--text)}
 header{padding:22px 5vw;border-bottom:1px solid var(--line);display:flex;justify-content:space-between;align-items:center;position:sticky;top:0;background:#0b1020e8;backdrop-filter:blur(12px);z-index:2}
 .brand{font-size:22px;font-weight:800}.badge{font-size:12px;padding:5px 9px;border:1px solid #31506f;border-radius:99px;color:#bfe0ff}
@@ -18,6 +17,7 @@ button.secondary{background:#202d47;color:#dce8ff}.pill{padding:5px 8px;border-r
 .modal.on{display:flex}.modalbox{max-width:980px;width:100%;max-height:90vh;overflow:auto;background:#10192c;border:1px solid var(--line);border-radius:18px;padding:24px}
 .tabs{display:flex;gap:8px;flex-wrap:wrap;margin:15px 0}.tab{background:#1a2740;color:#cfe0fb}.tab.active{background:#76a9ff;color:#071021}
 .pre{white-space:pre-wrap;background:#0a1120;border:1px solid var(--line);padding:14px;border-radius:10px}.actions{display:flex;justify-content:flex-end;gap:8px;margin-top:15px}
+input{width:100%;padding:11px;border-radius:10px;border:1px solid var(--line);background:#0a1120;color:var(--text);outline:none}
 @media(max-width:900px){.grid{grid-template-columns:repeat(2,1fr)}.job{grid-template-columns:1fr 1fr}.job button{grid-column:1/-1;width:100%}}
 @media(max-width:560px){.grid{grid-template-columns:1fr}.wrap{padding:20px 4vw}header{padding:18px 4vw}.brand{font-size:18px}.modalbox{padding:18px}}
 </style>
@@ -32,51 +32,41 @@ button.secondary{background:#202d47;color:#dce8ff}.pill{padding:5px 8px;border-r
 <div class="card kpi"><span class="muted">Configured floor</span><b>₹3L</b></div>
 </section>
 <section class="card" style="margin-top:20px">
-<div style="display:flex;justify-content:space-between;gap:12px;align-items:center">
-<div><h2 style="margin:0 0 5px">Application Queue</h2><div class="muted">Imported jobs are evaluated against your profile and rules.</div></div>
-<button class="secondary" onclick="load()">Refresh</button>
+<div style="display:flex;justify-content:space-between;gap:12px;align-items:center;flex-wrap:wrap">
+<div><h2 style="margin:0 0 5px">Discovery</h2><div class="muted">Add an authorized RSS/Atom job feed, then discover and score new jobs.</div></div>
+<div style="display:flex;gap:8px"><button onclick="discover()">Discover jobs</button><button class="secondary" onclick="load()">Refresh</button></div>
 </div>
+<div style="display:grid;grid-template-columns:1fr 2fr auto;gap:8px;margin-top:14px">
+<input id="feedName" placeholder="Feed name">
+<input id="feedUrl" placeholder="https://example.com/jobs/feed.xml">
+<button class="secondary" onclick="addFeed()">Add feed</button>
+</div>
+<div id="feedStatus" class="muted" style="margin-top:10px"></div>
+</section>
+<section class="card" style="margin-top:20px">
+<div style="display:flex;justify-content:space-between;align-items:center"><div><h2 style="margin:0 0 5px">Application Queue</h2><div class="muted">Imported jobs are evaluated against your profile and rules.</div></div></div>
 <div id="jobs" class="jobs"></div>
 </section>
 </main>
-<div id="modal" class="modal">
-<div class="modalbox">
-<div style="display:flex;justify-content:space-between;gap:12px;align-items:start">
-<div><h2 id="mtitle" style="margin:0">Application draft</h2><div id="mmeta" class="muted"></div></div>
-<button class="secondary" onclick="closeModal()">Close</button>
-</div>
+<div id="modal" class="modal"><div class="modalbox">
+<div style="display:flex;justify-content:space-between;gap:12px;align-items:start"><div><h2 style="margin:0">Application draft</h2><div id="mmeta" class="muted"></div></div><button class="secondary" onclick="closeModal()">Close</button></div>
 <div class="tabs"><button class="tab active" onclick="showTab('summary',this)">Summary</button><button class="tab" onclick="showTab('cover',this)">Cover letter</button><button class="tab" onclick="showTab('answers',this)">Questions</button></div>
 <div id="tab-summary"></div><div id="tab-cover" style="display:none"></div><div id="tab-answers" style="display:none"></div>
 <div class="actions"><button class="secondary" onclick="mark('rejected')">Reject</button><button onclick="mark('approved')">Approve for submission</button></div>
-</div>
-</div>
+</div></div>
 <script>
 let currentApp=null;
 async function load(){
  const [jr,ar]=await Promise.all([fetch('/api/jobs').then(r=>r.json()),fetch('/api/applications').then(r=>r.json())]);
- document.querySelector('#k1').textContent=jr.length;
- document.querySelector('#k2').textContent=jr.filter(x=>x.status==='ready'||x.status==='application_ready').length;
- document.querySelector('#k3').textContent=ar.length;
+ document.querySelector('#k1').textContent=jr.length;document.querySelector('#k2').textContent=jr.filter(x=>x.status==='ready'||x.status==='application_ready').length;document.querySelector('#k3').textContent=ar.length;
  const el=document.querySelector('#jobs');
- if(!jr.length){el.innerHTML='<div class="empty">No jobs imported yet. Use POST /api/jobs/import with jobs from an approved source or ATS.</div>';return}
- el.innerHTML=jr.map(j=>`<div class="card job"><div><b>${esc(j.title)}</b><div class="muted">${esc(j.company)} · ${esc(j.location||'Location undisclosed')}</div></div><div><span class="pill">${esc(j.work_mode||'Mode unknown')}</span></div><div class="score">${Math.round(j.match_score)}%</div><div>${j.salary_min||j.salary_max?'₹'+(j.salary_min||'')+'–'+(j.salary_max||'')+' LPA':'Salary TBD'}</div><button onclick="prepare(${j.id})">Prepare application</button></div>`).join('')
+ if(!jr.length){el.innerHTML='<div class="empty">No jobs discovered yet. Add an authorized RSS/Atom feed above.</div>';return}
+ el.innerHTML=jr.map(j=>`<div class="card job"><div><b>${esc(j.title)}</b><div class="muted">${esc(j.company)} · ${esc(j.location||'Location undisclosed')}</div></div><div><span class="pill">${esc(j.status)}</span></div><div class="score">${Math.round(j.match_score)}%</div><div>${j.salary_min||j.salary_max?'₹'+(j.salary_min||'')+'–'+(j.salary_max||'')+' LPA':'Salary TBD'}</div><button onclick="prepare(${j.id})">Prepare application</button></div>`).join('')
 }
-async function prepare(id){
- const x=await fetch('/api/jobs/'+id+'/prepare',{method:'POST'}).then(r=>r.json());
- if(x.error){alert(x.error);return}
- currentApp=x;
- document.querySelector('#mmeta').textContent='Draft ID: '+x.application_id;
- document.querySelector('#tab-summary').innerHTML='<div class="pre">'+esc(x.summary)+'</div>';
- document.querySelector('#tab-cover').innerHTML='<div class="pre">'+esc(x.cover_letter)+'</div>';
- document.querySelector('#tab-answers').innerHTML=Object.entries(x.answers).map(([k,v])=>'<p><b>'+esc(k.replaceAll('_',' '))+'</b></p><div class="pre">'+esc(v)+'</div>').join('');
- document.querySelector('#modal').classList.add('on');
- load();
-}
-async function mark(status){
- if(!currentApp)return;
- await fetch('/api/applications/'+currentApp.application_id+'/status',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({status})});
- closeModal(); load();
-}
+async function addFeed(){const name=document.querySelector('#feedName').value.trim(),url=document.querySelector('#feedUrl').value.trim();if(!name||!url){return alert('Enter a feed name and URL.')}const r=await fetch('/api/feeds',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name,url,source_type:'rss'})});const x=await r.json();document.querySelector('#feedStatus').textContent=x.ok?'Feed added. Click Discover jobs.':(x.error||'Could not add feed.')}
+async function discover(){document.querySelector('#feedStatus').textContent='Checking enabled feeds...';const r=await fetch('/api/discover',{method:'POST'}),x=await r.json();document.querySelector('#feedStatus').textContent=`Checked ${x.feeds_checked} feeds · saw ${x.items_seen} items · added ${x.new_jobs} new jobs`+(x.errors?.length?' · Some feeds returned errors.':'');load()}
+async function prepare(id){const x=await fetch('/api/jobs/'+id+'/prepare',{method:'POST'}).then(r=>r.json());if(x.error)return alert(x.error);currentApp=x;document.querySelector('#mmeta').textContent='Draft ID: '+x.application_id;document.querySelector('#tab-summary').innerHTML='<div class="pre">'+esc(x.summary)+'</div>';document.querySelector('#tab-cover').innerHTML='<div class="pre">'+esc(x.cover_letter)+'</div>';document.querySelector('#tab-answers').innerHTML=Object.entries(x.answers).map(([k,v])=>'<p><b>'+esc(k.replaceAll('_',' '))+'</b></p><div class="pre">'+esc(v)+'</div>').join('');document.querySelector('#modal').classList.add('on');load()}
+async function mark(status){if(!currentApp)return;await fetch('/api/applications/'+currentApp.application_id+'/status',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({status})});closeModal();load()}
 function showTab(name,btn){for(const x of ['summary','cover','answers'])document.querySelector('#tab-'+x).style.display=x===name?'block':'none';document.querySelectorAll('.tab').forEach(b=>b.classList.remove('active'));btn.classList.add('active')}
 function closeModal(){document.querySelector('#modal').classList.remove('on')}
 function esc(s){return String(s).replace(/[&<>'"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[c]))}
