@@ -23,6 +23,10 @@ CANDIDATE_EMAIL = os.getenv("CANDIDATE_EMAIL", "").strip()
 CANDIDATE_PHONE = os.getenv("CANDIDATE_PHONE", "").strip()
 RESUME_PATH = os.getenv("RESUME_PATH", "").strip()
 
+def resume_file_path():
+    configured = RESUME_PATH or str(DATA / "resume.pdf")
+    return Path(configured)
+
 app = Flask(__name__, static_folder="web", static_url_path="")
 
 CANDIDATE = {
@@ -560,6 +564,18 @@ def discover():
     return jsonify(run_discovery(request.get_json(silent=True) or {}))
 
 
+@app.post("/api/resume")
+def upload_resume():
+    uploaded = request.files.get("resume")
+    if not uploaded or not uploaded.filename:
+        return jsonify({"error": "Resume file is required"}), 400
+    if not uploaded.filename.lower().endswith(".pdf"):
+        return jsonify({"error": "Only PDF resumes are accepted"}), 400
+    target = DATA / "resume.pdf"
+    uploaded.save(target)
+    return jsonify({"ok": True, "message": "Resume uploaded for this ApplyBot instance."})
+
+
 @app.get("/api/config")
 def config_status():
     return jsonify({
@@ -567,7 +583,7 @@ def config_status():
         "auto_apply_max": AUTO_APPLY_MAX,
         "candidate_email_configured": bool(CANDIDATE_EMAIL),
         "candidate_phone_configured": bool(CANDIDATE_PHONE),
-        "resume_configured": bool(RESUME_PATH and Path(RESUME_PATH).exists()),
+        "resume_configured": resume_file_path().is_file(),
         "supported_browser_adapters": ["greenhouse", "lever"],
         "note": "Automatic submission uses public application forms. CAPTCHA and login challenges stop the workflow."
     })
@@ -655,7 +671,7 @@ def submit_with_browser(job, answers):
     if not CANDIDATE_EMAIL or not CANDIDATE_PHONE or not RESUME_PATH:
         return {"status": "requires_configuration", "adapter": adapter,
                 "message": "Configure CANDIDATE_EMAIL, CANDIDATE_PHONE and RESUME_PATH."}
-    if not Path(RESUME_PATH).is_file():
+    if not resume_file_path().is_file():
         return {"status": "requires_configuration", "adapter": adapter,
                 "message": "Configured resume file does not exist."}
 
@@ -690,7 +706,7 @@ def submit_with_browser(job, answers):
 
             files = page.locator('input[type="file"]')
             if files.count():
-                files.first.set_input_files(RESUME_PATH)
+                files.first.set_input_files(str(resume_file_path()))
 
             cover = answers.get("cover_letter", "")
             _fill_label(page, [r"cover letter", r"additional information", r"message"], cover)
