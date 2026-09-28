@@ -491,7 +491,7 @@ def _jobicy_geo(location):
     if "remote" in value or value in {"anywhere", "worldwide", "global"}:
         return "anywhere"
     country_map = {
-        "india": "india", "united states": "usa", "usa": "usa", "us": "usa",
+        "india": "apac", "united states": "usa", "usa": "usa", "us": "usa",
         "united kingdom": "uk", "uk": "uk", "canada": "canada",
         "australia": "australia", "europe": "europe", "asia": "asia", "apac": "apac",
     }
@@ -516,7 +516,9 @@ def search_jobicy_jobs(query, location="", remote=False):
         for job in rows:
             hay = (job.get("location") or "").lower()
             if location_value and not remote:
-                if location_value not in hay and "anywhere" not in hay and "remote" not in hay:
+                if location_value == "india" and "apac" in hay:
+                    pass
+                elif location_value not in hay and "anywhere" not in hay and "remote" not in hay:
                     continue
             job["_query"] = query
             filtered.append(job)
