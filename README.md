@@ -227,192 +227,92 @@ If salary or experience is omitted, ApplyBot attempts to extract them from the j
 
 ## Job discovery
 
-ApplyBot now supports **three practical discovery paths**.
+ApplyBot performs job discovery **inside the application**. The dashboard no longer opens LinkedIn, Google, or another hiring-site search page for discovery.
 
-### 1. LinkedIn-assisted search
+### Built-in sources
 
-The dashboard's **In-app job search** button builds a normal LinkedIn Jobs search URL from your criteria:
+1. **Remotive public API** — remote jobs with keyword search.
+2. **Arbeitnow public Job Board API** — public job data aggregated from multiple ATS sources.
+3. **Authorized RSS/Atom feeds** — optional feeds you configure under Job Discovery.
 
-- Role / keywords
-- Location
-- Remote preference
+Remotive documents keyword filtering through its public API and asks integrations to attribute/link the original listing. Its public data may be delayed, so ApplyBot keeps requests bounded rather than continuously polling. Arbeitnow documents its free, no-key job API and notes that its data comes from multiple ATS/job sources. citeturn3search0turn2view0
 
-Example:
+### In-app workflow
 
-```
-QA Automation Engineer + India + Remote
-```
+Enter:
 
-ApplyBot opens the search in your browser. You select the jobs you want to evaluate.
+- **Role / keywords** — e.g. QA Automation Engineer
+- **Location** — e.g. India
+- **Remote only** — optional
 
-**Important:** ApplyBot does not log in to LinkedIn, collect passwords, collect session cookies, bypass CAPTCHA, scrape LinkedIn pages, or automate activity intended to evade LinkedIn controls.
+Then click **Search inside ApplyBot**.
 
-### 2. Analyze a LinkedIn job you selected
+The backend:
 
-After opening LinkedIn:
+1. Queries the authorized public job APIs.
+2. Normalizes different source formats into one job model.
+3. Filters by location/remote preference.
+4. Removes duplicate listings.
+5. Extracts salary/experience only when the source format is unambiguous.
+6. Scores each job against the candidate profile.
+7. Stores the results in PostgreSQL/Supabase or SQLite.
+8. Displays the matches directly in **Application Queue**.
 
-1. Open a job you are authorized to view.
-2. Copy the job URL.
-3. Copy the job description/details available to you.
-4. Paste the title, company, location, job URL and description into **Analyze a job you found**.
-5. Click **Analyze & add job**.
-6. ApplyBot extracts experience/salary where possible.
-7. The matching engine scores the job against your profile.
-8. If suitable, use **Prepare application**.
-9. Review the generated application before submitting it on the original platform.
+Click **Discover & score jobs** to run the same API search plus all enabled RSS/Atom feeds.
 
-API:
+### Discovery API
 
-```http
-POST /api/jobs/manual
-Content-Type: application/json
-```
-
-Example:
+POST /api/discover/search
 
 ```json
 {
-  "title": "QA Automation Engineer",
-  "company": "Example Corp",
-  "location": "Bangalore",
-  "work_mode": "Hybrid",
-  "url": "https://www.linkedin.com/jobs/view/example",
-  "description": "Playwright, Python, API testing, 1+ years..."
+  "query": "QA Automation Engineer",
+  "location": "India",
+  "remote": false
 }
 ```
 
-### What should I enter in the Feed URL field?
+The response includes:
 
-The **Feed URL field is not a normal job-search URL**.
+- items_seen
+- new_jobs
+- sources_checked
+- errors
+- scoring results for newly imported jobs
 
-It must point to an **RSS or Atom XML feed** that you are authorized to access. The feed should contain individual job entries.
+### RSS/Atom feeds
 
-Valid examples of the *format* are:
+You can still add an authorized company/organization feed:
 
-```
-https://company.example/jobs/feed.xml
-https://company.example/careers/rss
-https://jobs.example.com/atom.xml
-```
-
-These are examples of URL patterns only; they are not guaranteed to be live feeds.
-
-#### How to tell if a URL is a real feed
-
-Open the URL in your browser.
-
-A valid feed normally returns XML containing elements such as:
-
-```xml
-<rss>
-  <channel>
-    <item>
-      <title>QA Automation Engineer</title>
-      <link>https://company.example/jobs/123</link>
-      <description>Playwright, Python, API testing...</description>
-    </item>
-  </channel>
-</rss>
-```
-
-An Atom feed may look like:
-
-```xml
-<feed>
-  <entry>
-    <title>QA Automation Engineer</title>
-    <link href="https://company.example/jobs/123"/>
-    <summary>Playwright, Python, API testing...</summary>
-  </entry>
-</feed>
-```
-
-If the URL opens a normal HTML careers page or a normal LinkedIn Jobs search page, **do not put that URL into the Feed URL field**.
-
-#### Where can I get a feed?
-
-Look on an authorized job source for labels such as:
-
-- RSS
-- RSS Feed
-- Job Feed
-- Atom
-- Subscribe to jobs
-- Careers feed
-- Jobs API
-
-Company ATS platforms or job boards may expose feeds or APIs. Use only sources whose access and automated use you are permitted to use.
-
-#### Example workflow
-
-```
-1. Find a company/ATS that provides an authorized RSS feed
-              ↓
-2. Copy the actual .xml / RSS / Atom feed URL
-              ↓
-3. ApplyBot → Job Discovery
-              ↓
-4. Enter feed name
-   Example: "Example Corp Jobs"
-              ↓
-5. Enter feed URL
-   Example: "https://company.example/jobs/feed.xml"
-              ↓
-6. Click "Add feed"
-              ↓
-7. Click "Discover jobs"
-              ↓
-8. ApplyBot imports and scores the jobs
-```
-
-**Important:** `https://www.linkedin.com/jobs/search/...` is a search page, not an RSS feed. Use the **In-app job search** button in ApplyBot instead, then use **Analyze a job you found** for jobs you want to evaluate.
-
-### 3. Authorized RSS/Atom feeds
-
-For sources that provide a permitted RSS/Atom feed:
-
-```http
 POST /api/feeds
-Content-Type: application/json
-```
 
 ```json
 {
-  "name": "Example Jobs Feed",
+  "name": "Example Company Jobs",
   "url": "https://example.com/jobs/feed.xml",
   "source_type": "rss"
 }
 ```
 
-Then:
+Then **Discover & score jobs** fetches both the built-in APIs and enabled feeds.
 
-```http
-POST /api/discover
-```
+A feed URL must return RSS/Atom XML; a normal careers page or LinkedIn search URL is not a feed.
 
-The discovery endpoint:
+### Manual job analysis
 
-1. Loads enabled feeds.
-2. Downloads RSS/Atom XML.
-3. Extracts job data.
-4. Runs the candidate matching engine.
-5. Stores suitable and skipped jobs.
-6. Ignores duplicate external IDs.
-7. Returns source errors without discarding successful sources.
+The **Analyze a job you found** section remains available when you already have a job URL and description. It is an optional fallback, not part of automatic discovery.
 
-Only use feeds and sources you are permitted to access.
+### Security / platform boundary
 
-### Search-link API
+ApplyBot does not:
 
-```http
-GET /api/search-links?query=QA%20Automation%20Engineer&location=India&remote=true
-```
+- collect LinkedIn passwords or session cookies
+- bypass CAPTCHAs
+- use stealth fingerprinting
+- scrape authenticated hiring-platform pages
+- automate activity intended to evade platform controls
 
-Returns:
-
-- `linkedin` — normal LinkedIn Jobs search URL.
-- `google_linkedin` — Google search constrained toward LinkedIn job pages.
-- `note` — the security boundary for the workflow.
+Discovery uses documented/public APIs and feeds that permit automated access.
 
 ## Matching rules
 
