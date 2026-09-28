@@ -678,7 +678,7 @@ def import_job_items(items):
             c.execute(
                 """INSERT INTO jobs(external_id,source,title,company,location,work_mode,salary_min,salary_max,
                 experience_min,source_url,url,description,discovered_at,match_score,status,skip_reason,match_reasons,matched_skills)
-                VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                 (ext, j.get("source", "manual"), j["title"], j["company"], j.get("location", ""),
                  j.get("work_mode", ""), smin, smax, exp, j.get("source_url", j["url"]), j["url"], j["description"], utcnow(), sc, status,
                  "; ".join(reasons), json.dumps(reasons), json.dumps(matched)),
