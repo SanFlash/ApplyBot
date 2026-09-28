@@ -20,5 +20,13 @@ services:
         sync: false
       - key: CANDIDATE_PHONE
         sync: false
+      - key: ADZUNA_APP_ID
+        sync: false
+      - key: ADZUNA_APP_KEY
+        sync: false
+      - key: GREENHOUSE_BOARDS
+        value: ""
+      - key: LEVER_COMPANIES
+        value: ""
       - key: RESUME_PATH
         sync: false
