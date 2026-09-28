@@ -66,14 +66,39 @@ def test_database_initialization_uses_valid_sqlite_identity_columns(tmp_path, mo
     assert columns["id"] == 1
 
 
-def test_search_links_are_user_initiated(tmp_path, monkeypatch):
+def test_search_links_now_describe_in_app_mode(tmp_path, monkeypatch):
     client = setup_db(tmp_path, monkeypatch)
     r = client.get("/api/search-links?query=QA%20Automation%20Engineer&location=India&remote=true")
     assert r.status_code == 200
-    assert "linkedin.com/jobs/search" in r.json["linkedin"]
-    assert "QA+Automation+Engineer" in r.json["linkedin"]
-    assert "f_WT=2" in r.json["linkedin"]
-    assert "does not scrape LinkedIn" in r.json["note"]
+    assert r.json["mode"] == "in_app"
+    assert r.json["query"] == "QA Automation Engineer"
+    assert r.json["location"] == "India"
+    assert r.json["remote"] is True
+    assert "inside the application" in r.json["note"]
+
+
+def test_location_matches_india_and_remote():
+    assert applybot.location_matches({"location": "Bengaluru, India", "description": ""}, "India")
+    assert applybot.location_matches({"location": "Worldwide", "work_mode": "Remote", "description": ""}, "India", True)
+    assert not applybot.location_matches({"location": "Berlin, Germany", "description": ""}, "India")
+
+
+def test_normalize_remotive_job():
+    jobs = applybot.normalize_remotive_jobs({
+        "jobs": [{
+            "id": 123,
+            "title": "QA Automation Engineer",
+            "company_name": "Example",
+            "candidate_required_location": "India",
+            "salary": "$40,000 - $50,000",
+            "url": "https://remotive.com/remote-jobs/example/qa-automation-engineer-123",
+            "description": "<p>Playwright Python API testing</p>",
+        }]
+    })
+    assert jobs[0]["external_id"] == "remotive:123"
+    assert jobs[0]["company"] == "Example"
+    assert jobs[0]["work_mode"] == "Remote"
+    assert jobs[0]["salary_min"] == 40000
 
 
 def test_manual_job_import_from_user_assisted_source(tmp_path, monkeypatch):
@@ -92,6 +117,32 @@ def test_manual_job_import_from_user_assisted_source(tmp_path, monkeypatch):
     jobs = client.get("/api/jobs").json
     assert jobs[0]["source"] == "user-assisted"
     assert jobs[0]["status"] == "ready"
+
+
+def test_discover_search_uses_server_side_sources(tmp_path, monkeypatch):
+    client = setup_db(tmp_path, monkeypatch)
+
+    def fake_search(query, location="", remote=False):
+        return ([{
+            "external_id": "remotive:999",
+            "source": "Remotive",
+            "title": "QA Automation Engineer",
+            "company": "Example Remote",
+            "location": "India",
+            "work_mode": "Remote",
+            "salary_min": None,
+            "salary_max": None,
+            "url": "https://remotive.com/remote-jobs/example/qa-automation-engineer-999",
+            "description": "Playwright Python API testing, 1 year experience, 4-6 LPA",
+        }], [])
+
+    monkeypatch.setattr(applybot, "search_public_sources", fake_search)
+    r = client.post("/api/discover/search", json={"query": "QA Automation Engineer", "location": "India", "remote": True})
+    assert r.status_code == 200
+    assert r.json["mode"] == "in_app"
+    assert r.json["items_seen"] == 1
+    assert r.json["new_jobs"] == 1
+    assert client.get("/api/jobs").json[0]["source"] == "Remotive"
 
 
 def test_add_feed_sqlite(tmp_path, monkeypatch):
