@@ -481,6 +481,10 @@ def import_job_items(items):
         except Exception as exc:
             if "unique" not in str(exc).lower() and "duplicate" not in str(exc).lower():
                 raise
+            existing = c.execute("SELECT id FROM jobs WHERE external_id=?", (ext,)).fetchone()
+            if existing:
+                created.append({"job_id": existing["id"], "external_id": ext, "score": sc, "status": status,
+                                 "matched_skills": matched, "reasons": reasons, "duplicate": True})
     c.commit()
     c.close()
     return created
@@ -514,15 +518,29 @@ def run_discovery(body):
     location = str(body.get("location") or "India").strip()
     remote = bool(body.get("remote", False))
     threshold = float(body.get("threshold", 70))
+    max_experience = float(body.get("max_experience", 2))
+    min_salary = max(float(body.get("min_salary", 3)), CANDIDATE["minimum_ctc_lpa"])
     items, errors = search_public_sources(query, location, remote)
     results = import_job_items(items)
-    qualified = [r for r in results if float(r.get("score") or 0) >= threshold]
+
+    c = db()
+    qualified = []
+    for r in results:
+        row = c.execute("SELECT experience_min,salary_max FROM jobs WHERE id=?", (r.get("job_id"),)).fetchone()
+        exp_ok = not row or row["experience_min"] is None or float(row["experience_min"]) <= max_experience
+        salary_ok = not row or row["salary_max"] is None or float(row["salary_max"]) >= min_salary
+        if float(r.get("score") or 0) >= threshold and exp_ok and salary_ok:
+            qualified.append(r)
+    c.close()
+
     return {
         "mode": "in_app",
         "query": query,
         "location": location,
         "remote": remote,
         "threshold": threshold,
+        "max_experience": max_experience,
+        "min_salary": min_salary,
         "sources_checked": ["Remotive", "Arbeitnow"],
         "items_seen": len(items),
         "new_jobs": len(results),
