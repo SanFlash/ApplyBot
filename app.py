@@ -665,9 +665,12 @@ def _fill_label(page, patterns, value):
 
 def submit_with_browser(job, answers):
     adapter = detect_application_adapter(job["url"])
+    if job.get("source") == "Remotive":
+        return {"status": "unsupported_source_policy", "adapter": adapter,
+                "message": "Remotive public API terms do not permit submitting its listings to third-party sites. This listing can be reviewed, but ApplyBot will not auto-submit it."}
     if adapter == "unsupported":
         return {"status": "unsupported", "adapter": adapter,
-                "message": "No supported public ATS application adapter for this URL."}
+                "message": "Auto-apply requires the stored job URL to be a direct supported Greenhouse or Lever application page."}
     if not CANDIDATE_EMAIL or not CANDIDATE_PHONE or not RESUME_PATH:
         return {"status": "requires_configuration", "adapter": adapter,
                 "message": "Configure CANDIDATE_EMAIL, CANDIDATE_PHONE and RESUME_PATH."}
@@ -792,7 +795,7 @@ def auto_apply_job(job_id, threshold=70):
     status = result["status"]
     if status == "submitted":
         stored_status, submitted_at = "applied", now
-    elif status in {"requires_user_action", "requires_configuration", "failed", "unsupported"}:
+    elif status in {"requires_user_action", "requires_configuration", "failed", "unsupported", "unsupported_source_policy"}:
         stored_status, submitted_at = status, None
     else:
         stored_status, submitted_at = "approved", None
@@ -831,7 +834,7 @@ def auto_apply_job(job_id, threshold=70):
     c.commit()
     c.close()
     return {
-        "ok": status not in {"failed", "below_threshold"},
+        "ok": status not in {"failed", "below_threshold", "unsupported_source_policy"},
         "status": status,
         "application_id": aid,
         "job_id": job_id,
