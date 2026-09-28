@@ -501,8 +501,25 @@ def _jobicy_geo(location):
     return ""
 
 
+def _jobicy_search_tag(query):
+    requested = (query or "").strip()
+    q = requested.lower()
+    for role in CANDIDATE["roles_primary"]:
+        if role.lower() in q or q in role.lower():
+            words = [w for w in re.findall(r"[a-z]+", role.lower()) if len(w) >= 3]
+            for preferred in ("qa", "sdet", "automation", "tester", "testing", "software"):
+                if preferred in words:
+                    return preferred
+            return words[0] if words else "qa"
+    words = [w for w in re.findall(r"[a-z]+", q) if len(w) >= 3 and w not in STOPWORDS]
+    return words[0] if words else "qa"
+
+
 def search_jobicy_jobs(query, location="", remote=False):
-    params = {"count": JOBICY_COUNT, "tag": query.strip() or "QA Automation Engineer"}
+    # Jobicy tag is a content keyword filter, not a semantic exact-match search.
+    # Use one strong anchor and let ApplyBot scoring enforce the requested role.
+    tag = _jobicy_search_tag(query)
+    params = {"count": JOBICY_COUNT, "tag": tag}
     geo = _jobicy_geo(location)
     if remote:
         params["geo"] = "anywhere"
@@ -516,15 +533,22 @@ def search_jobicy_jobs(query, location="", remote=False):
         for job in rows:
             hay = (job.get("location") or "").lower()
             if location_value and not remote:
-                if location_value == "india" and "apac" in hay:
+                if location_value == "india" and ("apac" in hay or "india" in hay):
                     pass
                 elif location_value not in hay and "anywhere" not in hay and "remote" not in hay:
                     continue
             job["_query"] = query
             filtered.append(job)
-        return filtered, [], [{"source": "Jobicy", "found": len(filtered), "configured": True, "provider": "Jobicy Public REST API"}]
+        return filtered, [], [{
+            "source": "Jobicy", "found": len(filtered), "configured": True,
+            "provider": "Jobicy Public REST API", "tag": tag, "geo": geo or "anywhere"
+        }]
     except Exception as exc:
-        return [], [{"source": "Jobicy", "error": str(exc)[:1000]}], [{"source": "Jobicy", "found": 0, "configured": True, "provider": "Jobicy Public REST API"}]
+        return [], [{"source": "Jobicy", "error": str(exc)[:1000]}], [{
+            "source": "Jobicy", "found": 0, "configured": True,
+            "provider": "Jobicy Public REST API", "tag": tag, "geo": geo or "anywhere"
+        }]
+
 
 
 def normalize_remotive_jobs(data):
@@ -851,7 +875,10 @@ def config_status():
 @app.get("/api/jobs")
 def jobs():
     c = db()
-    rows = c.execute("SELECT * FROM jobs ORDER BY match_score DESC, discovered_at DESC").fetchall()
+    if ENABLE_LEGACY_SOURCES:
+        rows = c.execute("SELECT * FROM jobs ORDER BY match_score DESC, discovered_at DESC").fetchall()
+    else:
+        rows = c.execute("SELECT * FROM jobs WHERE source=? ORDER BY match_score DESC, discovered_at DESC", ("Jobicy",)).fetchall()
     c.close()
     return jsonify([dict(r) for r in rows])
 
