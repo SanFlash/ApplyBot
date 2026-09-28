@@ -121,7 +121,7 @@ async function discover(auto){
  const r=await fetch('/api/discover',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
  const x=await r.json();
  if(!r.ok){$('status').textContent=x.error||'Discovery failed';return}
- $('status').textContent='Found '+x.items_seen+' listings from '+x.sources_checked.join(', ')+' · '+x.qualified_jobs+' qualified at '+x.threshold+'%+.';
+ $('status').textContent='Found '+x.items_seen+' listings. '+(x.sources_checked||[]).map(v=>v.source+': '+v.found+(v.configured?'':' (not configured)')).join(' · ')+' · '+x.qualified_jobs+' qualified at '+x.threshold+'%+.';
  await loadJobs();
  if(auto){
   const candidates=(x.results||[]).filter(j=>j.qualified && j.job_id).slice(0,Number(val('maxApply')||3));
