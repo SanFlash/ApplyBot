@@ -443,7 +443,8 @@ def import_job_items(items):
                  j.get("work_mode", ""), smin, smax, exp, j["url"], j["description"], utcnow(), sc, status,
                  "; ".join(reasons)),
             )
-            created.append({"external_id": ext, "score": sc, "status": status, "matched_skills": matched, "reasons": reasons})
+            inserted = c.execute("SELECT id FROM jobs WHERE external_id=?", (ext,)).fetchone()
+            created.append({"job_id": inserted["id"] if inserted else None, "external_id": ext, "score": sc, "status": status, "matched_skills": matched, "reasons": reasons})
         except Exception as exc:
             if "unique" not in str(exc).lower() and "duplicate" not in str(exc).lower():
                 raise
@@ -534,44 +535,49 @@ def manual_job():
 
 
 def auto_apply_job(job_id, threshold=70):
-    # Submission is intentionally limited to public, authorized application
-    # forms. No login/cookie/CAPTCHA bypass is attempted.
+    # This endpoint performs the qualification/application-preparation step.
+    # Actual third-party submission requires a supported, authorized application
+    # adapter and must never bypass login, CAPTCHA, or anti-bot controls.
     c = db()
     r = c.execute("SELECT * FROM jobs WHERE id=?", (job_id,)).fetchone()
     if not r:
         c.close()
         return {"ok": False, "error": "job not found"}
     job = dict(r)
-    if float(job.get("match_score") or 0) < float(threshold):
+    score = float(job.get("match_score") or 0)
+    if score < float(threshold):
         c.close()
-        return {"ok": False, "status": "below_threshold", "score": job.get("match_score"), "threshold": threshold}
+        return {"ok": False, "status": "below_threshold", "score": score, "threshold": threshold}
+
     answers = make_answers(job)
     now = utcnow()
+    summary = answers["why_hire"]
+    cover = ""
     if c.pg:
         cur = c.execute(
             "INSERT INTO applications(job_id,tailored_summary,cover_letter,answers_json,status,created_at,updated_at) "
             "VALUES(?,?,?,?,?,?,?) RETURNING id",
-            (job_id, answers["why_hire"], "", json.dumps(answers), "approved", now, now),
+            (job_id, summary, cover, json.dumps(answers), "approved", now, now),
         )
         aid = cur.fetchone()["id"]
     else:
         cur = c.execute(
             "INSERT INTO applications(job_id,tailored_summary,cover_letter,answers_json,status,created_at,updated_at) VALUES(?,?,?,?,?,?,?)",
-            (job_id, answers["why_hire"], "", json.dumps(answers), "approved", now, now),
+            (job_id, summary, cover, json.dumps(answers), "approved", now, now),
         )
         aid = cur.lastrowid
     c.execute("UPDATE jobs SET status=? WHERE id=?", ("application_ready", job_id))
     c.commit()
     c.close()
-    return {"ok": True, "status": "application_ready", "application_id": aid, "job_url": job["url"]}
-
-
-@app.post("/api/jobs/<int:job_id>/auto-apply")
-def auto_apply(job_id):
-    body = request.get_json(silent=True) or {}
-    threshold = float(body.get("threshold", 70))
-    return jsonify(auto_apply_job(job_id, threshold))
-
+    return {
+        "ok": True,
+        "status": "application_ready",
+        "application_id": aid,
+        "job_id": job_id,
+        "job_url": job["url"],
+        "submitted": False,
+        "message": "Job qualified and application data prepared. No third-party submission was claimed."
+    }
 
 @app.post("/api/jobs/<int:job_id>/prepare")
 def prepare(job_id):
