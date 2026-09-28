@@ -83,7 +83,7 @@ async function loadConfig(){
   ['Email',c.candidate_email_configured,c.candidate_email_configured?'Configured':'Missing'],
   ['Phone',c.candidate_phone_configured,c.candidate_phone_configured?'Configured':'Missing'],
   ['Resume',c.resume_configured,c.resume_configured?'Configured':'Missing'],
-  ['LinkedIn provider',c.discovery_sources && c.discovery_sources.LinkedIn,c.discovery_sources && c.discovery_sources.LinkedIn ? 'Bright Data configured' : 'Missing API key'],
+  ['LinkedIn provider',c.discovery_sources && c.discovery_sources.LinkedIn,c.discovery_sources && c.discovery_sources.LinkedIn ? 'Apify configured' : 'Missing API token'],
   ['ATS adapters',true,c.supported_browser_adapters.join(', ')]
  ].map(x=>'<div class="check '+(x[1]?'ok':'bad')+'"><b>'+esc(x[0])+'</b><br>'+esc(x[2])+'</div>').join('');
 }
