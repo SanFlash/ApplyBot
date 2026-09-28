@@ -229,3 +229,29 @@ def test_auto_apply_prepares_when_disabled(tmp_path, monkeypatch):
     assert r.status_code == 200
     assert r.json["status"] == "application_ready"
     assert r.json["submitted"] is False
+
+def test_normalize_linkedin_job():
+    jobs = applybot.normalize_linkedin_jobs({
+        "data": [{
+            "job_id": "123",
+            "job_title": "QA Automation Engineer",
+            "company_name": "Example",
+            "location": "Bengaluru, India",
+            "job_description": "1 year experience with Playwright, Python and API testing. Salary 4-6 LPA.",
+            "job_url": "https://www.linkedin.com/jobs/view/123",
+            "posted_date": "2026-09-28",
+        }]
+    })
+    assert jobs[0]["source"] == "LinkedIn"
+    assert jobs[0]["title"] == "QA Automation Engineer"
+    assert jobs[0]["salary_min"] == 4
+    assert jobs[0]["salary_max"] == 6
+    assert jobs[0]["experience_min"] == 1
+
+
+def test_linkedin_provider_requires_configuration(monkeypatch):
+    monkeypatch.setattr(applybot, "BRIGHTDATA_API_KEY", "")
+    jobs, errors, status = applybot.search_linkedin_jobs("QA Automation Engineer", "India")
+    assert jobs == []
+    assert errors and "not configured" in errors[0]["error"]
+    assert status[0]["configured"] is False
