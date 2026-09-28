@@ -20,12 +20,6 @@ services:
         sync: false
       - key: CANDIDATE_PHONE
         sync: false
-      - key: APIFY_API_TOKEN
-        sync: false
-      - key: APIFY_LINKEDIN_ACTOR
-        value: "curious_coder~linkedin-jobs-search-scraper"
-      - key: ENABLE_LEGACY_SOURCES
-        value: "false"
       - key: ADZUNA_APP_ID
         sync: false
       - key: ADZUNA_APP_KEY
