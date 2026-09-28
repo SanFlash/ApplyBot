@@ -23,12 +23,12 @@ def test_health(tmp_path, monkeypatch):
 def test_import_and_filter(tmp_path, monkeypatch):
     client = setup_db(tmp_path, monkeypatch)
     good = {
-        "external_id": "g1", "source": "test", "title": "QA Automation Engineer",
+        "external_id": "g1", "source": "Jobicy", "title": "QA Automation Engineer",
         "company": "Example", "location": "Bangalore", "work_mode": "Hybrid",
         "salary_min": 4, "salary_max": 6, "experience_min": 2,
         "url": "https://example.com/1", "description": "Playwright Python SQL API testing",
     }
-    bad = {**good, "external_id": "b1", "title": "Senior SDET", "experience_min": 4}
+    bad = {**good, "external_id": "b1", "source": "Jobicy", "title": "Senior SDET", "experience_min": 4}
     r = client.post("/api/jobs/import", json={"jobs": [good, bad]})
     assert r.status_code == 200
     jobs = client.get("/api/jobs").json
@@ -39,7 +39,7 @@ def test_import_and_filter(tmp_path, monkeypatch):
 def test_prepare_and_status(tmp_path, monkeypatch):
     client = setup_db(tmp_path, monkeypatch)
     job = {
-        "external_id": "g1", "source": "test", "title": "SDET", "company": "Example",
+        "external_id": "g1", "source": "Jobicy", "title": "SDET", "company": "Example",
         "location": "Pune", "work_mode": "Hybrid", "salary_min": 4, "salary_max": 6,
         "experience_min": 1, "url": "https://example.com/1",
         "description": "Playwright Python SQL API testing",
@@ -153,7 +153,7 @@ def test_discover_search_uses_threshold_and_returns_job_ids(tmp_path, monkeypatc
     def fake_search(query, location="", remote=False):
         return ([{
             "external_id": "job:999",
-            "source": "test-api",
+            "source": "Jobicy",
             "title": "QA Automation Engineer",
             "company": "Example",
             "location": "Indore",
@@ -182,7 +182,7 @@ def test_auto_apply_is_threshold_gated(tmp_path, monkeypatch):
     client = setup_db(tmp_path, monkeypatch)
     job = {
         "external_id": "threshold-1",
-        "source": "test-api",
+        "source": "Jobicy",
         "title": "QA Automation Engineer",
         "company": "Example",
         "location": "Indore",
@@ -212,7 +212,7 @@ def test_auto_apply_prepares_when_disabled(tmp_path, monkeypatch):
     monkeypatch.setattr(applybot, "AUTO_APPLY_ENABLED", False)
     job = {
         "external_id": "auto-1",
-        "source": "Greenhouse",
+        "source": "Jobicy",
         "title": "QA Automation Engineer",
         "company": "Example",
         "location": "Indore",
