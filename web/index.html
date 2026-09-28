@@ -34,20 +34,25 @@ textarea{min-height:130px;resize:vertical}.searchbox{margin-top:16px;padding:16p
 </section>
 <section class="card" style="margin-top:20px">
 <div style="display:flex;justify-content:space-between;gap:12px;align-items:center;flex-wrap:wrap">
-<div><h2 style="margin:0 0 5px">Job Discovery</h2><div class="muted">Search job sources, open LinkedIn with your criteria, or add an authorized feed.</div></div>
-<div style="display:flex;gap:8px"><button onclick="discover()">Discover jobs</button><button class="secondary" onclick="load()">Refresh</button></div>
+<div><h2 style="margin:0 0 5px">Job Discovery</h2><div class="muted">Search authorized job APIs and your configured feeds directly inside ApplyBot. No hiring-site search page is opened.</div></div>
+<div style="display:flex;gap:8px"><button onclick="discover()">Discover & score jobs</button><button class="secondary" onclick="load()">Refresh</button></div>
 </div>
 <div class="searchbox">
 <div class="searchrow">
 <input id="searchQuery" value="QA Automation Engineer" placeholder="Role / keywords">
 <input id="searchLocation" value="India" placeholder="Location">
-<label class="check"><input id="searchRemote" type="checkbox"> Remote</label>
+<label class="check"><input id="searchRemote" type="checkbox"> Remote only</label>
 </div>
 <div class="searchactions">
-<button onclick="openLinkedIn()">Search LinkedIn</button>
-<button class="secondary" onclick="openGoogleLinkedIn()">Search via Google</button>
+<button onclick="searchInApp()">Search inside ApplyBot</button>
 </div>
-<div class="hint">LinkedIn search is user-initiated. ApplyBot does not collect passwords/cookies or scrape LinkedIn.</div>
+<div class="hint">ApplyBot fetches job data server-side from authorized public APIs, normalizes it, filters it to your criteria, scores it against your profile, and stores the results here.</div>
+<div class="feedexamples">
+<b>Built-in sources</b>
+<div><code>Remotive</code> — remote jobs with keyword search</div>
+<div><code>Arbeitnow</code> — public job-board API data aggregated from ATS sources</div>
+<div class="hint">Additional authorized RSS/Atom feeds can be added below. Results remain inside the ApplyBot dashboard.</div>
+</div>
 </div>
 <div class="divider"></div>
 <div class="subhead">Authorized RSS / Atom feed</div>
@@ -75,7 +80,7 @@ textarea{min-height:130px;resize:vertical}.searchbox{margin-top:16px;padding:16p
 <textarea id="manualDescription" placeholder="Paste the job description here"></textarea>
 </div>
 <div class="searchactions"><button class="secondary" onclick="importManual()">Analyze & add job</button></div>
-<div class="hint">Paste details from a job you are authorized to view, including a LinkedIn job. ApplyBot will score it and prepare the application.</div>
+<div class="hint">Paste details from a job you are authorized to view, including a LinkedIn job. ApplyBot will score it and prepare the application. Discovery itself no longer requires opening LinkedIn, Google, or another hiring-site search page.</div>
 </section>
 <section class="card" style="margin-top:20px">
 <div style="display:flex;justify-content:space-between;align-items:center"><div><h2 style="margin:0 0 5px">Application Queue</h2><div class="muted">Imported jobs are evaluated against your profile and rules.</div></div></div>
@@ -94,16 +99,32 @@ async function load(){
  const [jr,ar]=await Promise.all([fetch('/api/jobs').then(r=>r.json()),fetch('/api/applications').then(r=>r.json())]);
  document.querySelector('#k1').textContent=jr.length;document.querySelector('#k2').textContent=jr.filter(x=>x.status==='ready'||x.status==='application_ready').length;document.querySelector('#k3').textContent=ar.length;
  const el=document.querySelector('#jobs');
- if(!jr.length){el.innerHTML='<div class="empty">No jobs yet. Search LinkedIn above or add an authorized feed, then analyze jobs you want to track.</div>';return}
+ if(!jr.length){el.innerHTML='<div class="empty">No jobs yet. Use “Search inside ApplyBot” or “Discover & score jobs”. Results are fetched and evaluated inside the application.</div>';return}
  el.innerHTML=jr.map(j=>`<div class="card job"><div><b>${esc(j.title)}</b><div class="muted">${esc(j.company)} · ${esc(j.location||'Location undisclosed')}</div></div><div><span class="pill">${esc(j.status)}</span></div><div class="score">${Math.round(j.match_score)}%</div><div>${j.salary_min||j.salary_max?'₹'+(j.salary_min||'')+'–'+(j.salary_max||'')+' LPA':'Salary TBD'}</div><button onclick="prepare(${j.id})">Prepare application</button></div>`).join('')
 }
-async function openLinkedIn(){const x=await searchLinks();if(x?.linkedin)window.open(x.linkedin,'_blank','noopener');}
-async function openGoogleLinkedIn(){const x=await searchLinks();if(x?.google_linkedin)window.open(x.google_linkedin,'_blank','noopener');}
-async function searchLinks(){const q=encodeURIComponent(document.querySelector('#searchQuery').value.trim()),l=encodeURIComponent(document.querySelector('#searchLocation').value.trim()),r=document.querySelector('#searchRemote').checked;return fetch('/api/search-links?query='+q+'&location='+l+'&remote='+r).then(x=>x.json())}
+async function searchInApp(){
+ const query=document.querySelector('#searchQuery').value.trim()||'QA Automation Engineer';
+ const location=document.querySelector('#searchLocation').value.trim()||'India';
+ const remote=document.querySelector('#searchRemote').checked;
+ document.querySelector('#feedStatus').textContent='Searching authorized sources inside ApplyBot...';
+ const r=await fetch('/api/discover/search',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({query,location,remote})});
+ const x=await r.json();
+ document.querySelector('#feedStatus').textContent=x.error||`Searched ${x.sources_checked?.join(', ')||'sources'} · found ${x.items_seen||0} matching items · added ${x.new_jobs||0} new jobs`+(x.errors?.length?' · Some sources returned errors.':'');
+ load();
+}
 async function importManual(){const body={title:document.querySelector('#manualTitle').value.trim(),company:document.querySelector('#manualCompany').value.trim(),location:document.querySelector('#manualLocation').value.trim(),work_mode:document.querySelector('#manualWorkMode').value.trim(),url:document.querySelector('#manualUrl').value.trim(),description:document.querySelector('#manualDescription').value.trim(),source:'user-assisted'};if(!body.title||!body.company||!body.url||!body.description)return alert('Enter title, company, job URL and job description.');const r=await fetch('/api/jobs/manual',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});const x=await r.json();document.querySelector('#feedStatus').textContent=x.error||('Job analyzed. '+x.imported+' new job added.');load()}
 
 async function addFeed(){const name=document.querySelector('#feedName').value.trim(),url=document.querySelector('#feedUrl').value.trim();if(!name||!url){return alert('Enter a feed name and URL.')}const r=await fetch('/api/feeds',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name,url,source_type:'rss'})});const x=await r.json();document.querySelector('#feedStatus').textContent=x.ok?'Feed added. Click Discover jobs.':(x.error||'Could not add feed.')}
-async function discover(){document.querySelector('#feedStatus').textContent='Checking enabled feeds...';const r=await fetch('/api/discover',{method:'POST'}),x=await r.json();document.querySelector('#feedStatus').textContent=`Checked ${x.feeds_checked} feeds · saw ${x.items_seen} items · added ${x.new_jobs} new jobs`+(x.errors?.length?' · Some feeds returned errors.':'');load()}
+async function discover(){
+ const query=document.querySelector('#searchQuery').value.trim()||'QA Automation Engineer';
+ const location=document.querySelector('#searchLocation').value.trim()||'India';
+ const remote=document.querySelector('#searchRemote').checked;
+ document.querySelector('#feedStatus').textContent='Running in-app discovery across APIs and configured feeds...';
+ const r=await fetch('/api/discover',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({query,location,remote})});
+ const x=await r.json();
+ document.querySelector('#feedStatus').textContent=x.error||`Checked ${(x.api_sources_checked||[]).join(', ')} + ${x.feeds_checked||0} feeds · saw ${x.items_seen||0} items · added ${x.new_jobs||0} new jobs`+(x.errors?.length?' · Some sources returned errors.':'');
+ load();
+}
 async function prepare(id){const x=await fetch('/api/jobs/'+id+'/prepare',{method:'POST'}).then(r=>r.json());if(x.error)return alert(x.error);currentApp=x;document.querySelector('#mmeta').textContent='Draft ID: '+x.application_id;document.querySelector('#tab-summary').innerHTML='<div class="pre">'+esc(x.summary)+'</div>';document.querySelector('#tab-cover').innerHTML='<div class="pre">'+esc(x.cover_letter)+'</div>';document.querySelector('#tab-answers').innerHTML=Object.entries(x.answers).map(([k,v])=>'<p><b>'+esc(k.replaceAll('_',' '))+'</b></p><div class="pre">'+esc(v)+'</div>').join('');document.querySelector('#modal').classList.add('on');load()}
 async function mark(status){if(!currentApp)return;await fetch('/api/applications/'+currentApp.application_id+'/status',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({status})});closeModal();load()}
 function showTab(name,btn){for(const x of ['summary','cover','answers'])document.querySelector('#tab-'+x).style.display=x===name?'block':'none';document.querySelectorAll('.tab').forEach(b=>b.classList.remove('active'));btn.classList.add('active')}
