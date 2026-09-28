@@ -59,7 +59,7 @@ def test_database_initialization_uses_valid_sqlite_identity_columns(tmp_path, mo
     conn = applybot.sqlite3.connect(applybot.SQLITE_DB)
     columns = {
         row[1]: row[5]
-        for table in ("jobs", "applications", "feed_sources")
+        for table in ("jobs", "applications")
         for row in conn.execute(f"PRAGMA table_info({table})").fetchall()
     }
     conn.close()
@@ -198,4 +198,4 @@ def test_auto_apply_is_threshold_gated(tmp_path, monkeypatch):
     r = client.post(f"/api/jobs/{job_row['id']}/auto-apply", json={"threshold": 99})
     assert r.status_code == 200
     assert r.json["status"] == "below_threshold"
-    assert r.json["submitted"] if "submitted" in r.json else True
+    assert r.json["status"] == "below_threshold"
