@@ -47,7 +47,7 @@ details{margin-top:8px}summary{cursor:pointer;color:#bcd8ff;font-size:12px}.hist
 <div class="actions" style="margin-top:18px"><button onclick="discover(false)">Search & Score</button><button onclick="discover(true)">Search + Auto Apply</button></div>
 </div>
 <div id="status" class="status">Ready.</div>
-<div class="config" id="config"></div>
+<div class="config" id="config"></div><div class="actions"><input id="resumeFile" type="file" accept=".pdf"><button class="secondary" onclick="uploadResume()">Upload resume</button></div>
 </section>
 
 <section class="card" style="margin-top:15px">
@@ -68,6 +68,14 @@ details{margin-top:8px}summary{cursor:pointer;color:#bcd8ff;font-size:12px}.hist
 const $=id=>document.getElementById(id);
 function esc(v){return String(v??'').replace(/[&<>'"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[c]))}
 function val(id){return $(id).value.trim()}
+async function uploadResume(){
+ const file=$('resumeFile').files[0];
+ if(!file){$('status').textContent='Choose a PDF resume first.';return}
+ const fd=new FormData();fd.append('resume',file);
+ const r=await fetch('/api/resume',{method:'POST',body:fd});const x=await r.json();
+ $('status').textContent=x.message||x.error||'Resume upload finished.';
+ await loadConfig();
+}
 async function loadConfig(){
  const c=await fetch('/api/config').then(r=>r.json());
  $('config').innerHTML=[
