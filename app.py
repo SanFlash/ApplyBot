@@ -554,6 +554,15 @@ def search_jobicy_jobs(query, location="", remote=False):
             job["_query"] = query
             if location_matches(job, location_text, remote):
                 filtered.append(job)
+        if not filtered:
+            fallback_params = {"count": JOBICY_COUNT}
+            data = fetch_json(JOBICY_API_URL, fallback_params, headers=headers, timeout=JOBICY_TIMEOUT)
+            fallback_rows = normalize_jobicy_jobs(data)
+            for job in fallback_rows:
+                job["_query"] = query
+                if location_matches(job, location_text, remote):
+                    filtered.append(job)
+            rows = fallback_rows
         return filtered, [], [{
             "source": "Jobicy", "found": len(filtered), "raw_found": len(rows),
             "configured": True,
