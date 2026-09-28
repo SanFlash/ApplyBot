@@ -319,3 +319,142 @@ Automatic application is limited to public, supported ATS application forms and 
 GitHub:
 
 https://github.com/SanFlash/ApplyBot
+
+
+## Complete setup and verification
+
+### 1. Open the deployed application
+
+Primary Render URL:
+
+https://applybot-ykp7.onrender.com
+
+### 2. Verify the server before searching
+
+Open:
+
+https://applybot-ykp7.onrender.com/api/health
+
+Expected JSON contains:
+- `"status": "ok"`
+- `"service": "ApplyBot"`
+- `"database": "postgres"` when the production database is configured.
+
+Then open:
+
+https://applybot-ykp7.onrender.com/api/provider-check
+
+Expected result:
+- `"ok": true`
+- `jobicy.ok: true`
+- `database_schema.ok: true`
+- `jobicy.count` greater than zero when Jobicy currently has matching QA listings.
+
+This endpoint performs a read-only Jobicy public-API check and does not use the paid direct-ATS API key.
+
+### 3. Configure candidate application data
+
+In Render → ApplyBot → Environment, configure:
+
+```text
+AUTO_APPLY_ENABLED=true
+AUTO_APPLY_MAX=3
+CANDIDATE_EMAIL=your-real-email
+CANDIDATE_PHONE=your-real-phone
+JOBICY_API_URL=https://jobicy.com/api/v2/remote-jobs
+JOBICY_COUNT=200
+JOBICY_TIMEOUT=30
+ENABLE_LEGACY_SOURCES=false
+```
+
+If you have Jobicy Commercial Jobs API access, put the Bearer key in `JOBICY_API_KEY`. Never commit it to GitHub.
+
+### 4. Upload the real resume
+
+Open the dashboard and use the resume upload control. Confirm the UI reports that the resume is configured.
+
+### 5. Search for the desired role
+
+Use, for example:
+
+```text
+Query: QA Automation Engineer
+Location: India
+Remote: enabled if remote roles are acceptable
+Threshold: 55
+Maximum experience: 2
+Minimum salary: 3
+```
+
+ApplyBot first requests current Jobicy data, then scores the returned listings locally. It does not use RSS/Atom or redirect you to LinkedIn for discovery.
+
+### 6. Understand the result
+
+The dashboard should show:
+
+```text
+Jobicy: N
+Found: N
+Qualified: N
+```
+
+For each listing, verify:
+- company
+- role
+- location/eligibility
+- match score
+- matched skills
+- Jobicy listing URL
+- employer application URL when one is actually available
+
+### 7. Automatic application
+
+A qualified job is only submitted when all configured checks pass.
+
+The browser automation:
+1. opens the employer application URL;
+2. detects the supported ATS;
+3. fills known candidate fields;
+4. uploads the configured resume;
+5. answers only questions supported by the candidate profile;
+6. checks required fields;
+7. stops if CAPTCHA, login, ambiguous questions, or unsupported flows are encountered;
+8. submits only when a clear submit control exists;
+9. verifies a submission/confirmation signal;
+10. records the application result.
+
+The database is updated to `applied` only after the submission step completes. A listing is never marked applied merely because it was discovered.
+
+### 8. Jobicy direct application URLs
+
+The free Jobicy API returns Jobicy listing URLs. Jobicy documents that the Commercial Jobs API can return the original ATS application URL when one exists, using a Bearer API key. The commercial API can charge per newly resolved direct URL, so ApplyBot's diagnostic endpoint intentionally uses the free public API.
+
+Without the commercial key, ApplyBot can still inspect a Jobicy listing page for an external application link, but some jobs will remain `requires_user_action` or `unsupported`.
+
+### 9. If Search & Score fails
+
+Do not repeatedly press Search. First open:
+
+```text
+/api/provider-check
+```
+
+Then check the Render service logs for:
+- `Jobicy`
+- `psycopg2`
+- `UndefinedColumn`
+- `HTTP Error`
+- `timeout`
+
+The production app initializes and migrates its PostgreSQL schema during Gunicorn import, so an existing database receives missing columns automatically.
+
+### 10. GitHub and Render
+
+The GitHub repository is the source of truth. Render deploys the `main` branch. After a code change, wait for the Render deployment to become `Live` before testing.
+
+Current production deployment verified on 2026-09-28:
+- commit: `d488ff28ff68c627b1dac71763744fb18aea0415`
+- Render deploy: `dep-dat66bojo6nc73edmlug`
+- status: `live`
+- primary URL: `https://applybot-ykp7.onrender.com`
+
