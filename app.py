@@ -24,8 +24,8 @@ CANDIDATE_PHONE = os.getenv("CANDIDATE_PHONE", "").strip()
 RESUME_PATH = os.getenv("RESUME_PATH", "").strip()
 ADZUNA_APP_ID = os.getenv("ADZUNA_APP_ID", "").strip()
 ADZUNA_APP_KEY = os.getenv("ADZUNA_APP_KEY", "").strip()
-BRIGHTDATA_API_KEY = os.getenv("BRIGHTDATA_API_KEY", "").strip()
-BRIGHTDATA_DATASET_ID = os.getenv("BRIGHTDATA_LINKEDIN_DATASET_ID", "gd_m487ihp32jtc4ujg45").strip()
+APIFY_API_TOKEN = os.getenv("APIFY_API_TOKEN", "").strip()
+APIFY_LINKEDIN_ACTOR = os.getenv("APIFY_LINKEDIN_ACTOR", "curious_coder~linkedin-jobs-search-scraper").strip()
 ENABLE_LEGACY_SOURCES = os.getenv("ENABLE_LEGACY_SOURCES", "false").lower() == "true"
 GREENHOUSE_BOARDS = [x.strip() for x in os.getenv("GREENHOUSE_BOARDS", "").split(",") if x.strip()]
 LEVER_COMPANIES = [x.strip() for x in os.getenv("LEVER_COMPANIES", "").split(",") if x.strip()]
@@ -133,6 +133,7 @@ def ensure_schema_columns(c):
         "jobs": {
             "match_reasons": "TEXT",
             "matched_skills": "TEXT",
+            "source_url": "TEXT",
         },
     }
     for table, wanted in migrations.items():
@@ -159,7 +160,7 @@ def init_db():
               id BIGSERIAL PRIMARY KEY, external_id TEXT UNIQUE NOT NULL, source TEXT NOT NULL,
               title TEXT NOT NULL, company TEXT NOT NULL, location TEXT, work_mode TEXT,
               salary_min DOUBLE PRECISION, salary_max DOUBLE PRECISION, experience_min DOUBLE PRECISION,
-              url TEXT NOT NULL, description TEXT NOT NULL, discovered_at TEXT NOT NULL,
+              source_url TEXT, source_url TEXT, url TEXT NOT NULL, description TEXT NOT NULL, discovered_at TEXT NOT NULL,
               match_score DOUBLE PRECISION DEFAULT 0, status TEXT DEFAULT 'new', skip_reason TEXT)""",
             """CREATE TABLE IF NOT EXISTS applications (
               id BIGSERIAL PRIMARY KEY, job_id BIGINT NOT NULL, tailored_summary TEXT,
@@ -375,13 +376,9 @@ def fetch_json(url, params=None):
         return json.loads(response.read().decode("utf-8"))
 
 
-def post_json(url, payload, headers=None, timeout=60):
+def post_json(url, payload, headers=None, timeout=120):
     body = json.dumps(payload).encode("utf-8")
-    request_headers = {
-        "User-Agent": "ApplyBot/2.0 (+live LinkedIn job discovery)",
-        "Accept": "application/json",
-        "Content-Type": "application/json",
-    }
+    request_headers = {"User-Agent": "ApplyBot/2.0 (+live LinkedIn job discovery)", "Accept": "application/json", "Content-Type": "application/json"}
     if headers:
         request_headers.update(headers)
     req = urllib.request.Request(url, data=body, headers=request_headers, method="POST")
@@ -399,73 +396,74 @@ def _first_value(raw, *keys):
 
 
 def normalize_linkedin_jobs(data):
-    if isinstance(data, list):
-        rows = data
-    elif isinstance(data, dict):
-        rows = data.get("data") or data.get("results") or data.get("items") or data.get("records") or []
-    else:
-        rows = []
+    rows = data if isinstance(data, list) else (data.get("data") or data.get("results") or data.get("items") or [])
     jobs = []
     for raw in rows:
         if not isinstance(raw, dict):
             continue
-        title = str(_first_value(raw, "job_title", "title", "position", "jobTitle")).strip()
-        company = str(_first_value(raw, "company_name", "company", "companyName", "organization")).strip()
-        location = str(_first_value(raw, "location", "job_location", "jobLocation", "location_name")).strip()
-        description = strip_html(str(_first_value(raw, "job_description", "description", "description_text", "descriptionText", "jobDescription")))
-        url = str(_first_value(raw, "job_url", "jobUrl", "linkedin_url", "linkedinUrl", "url", "apply_url", "applyUrl")).strip()
-        if not title or not company or not url:
+        title = str(_first_value(raw, "jobTitle", "job_title", "title", "position")).strip()
+        company = str(_first_value(raw, "companyName", "company_name", "company")).strip()
+        location = str(_first_value(raw, "location", "jobLocation", "job_location")).strip()
+        description = strip_html(str(_first_value(raw, "jobDescription", "description", "job_description")))
+        linkedin_url = str(_first_value(raw, "jobUrl", "job_url", "linkedinUrl", "linkedin_url", "url")).strip()
+        apply_url = str(_first_value(raw, "applyUrl", "apply_url", "applicationUrl", "application_url")).strip()
+        if not title or not company or not linkedin_url:
             continue
-        salary_text = str(_first_value(raw, "salary", "salary_range", "salaryRange", "compensation")).strip()
+        salary_text = str(_first_value(raw, "salary", "salaryInfo", "salary_range", "salaryRange")).strip()
         smin, smax = extract_salary(description + " " + salary_text)
         if smin is None and smax is None:
             smin, smax = parse_salary_text(salary_text)
-        exp = extract_experience(description + " " + str(_first_value(raw, "experience", "experience_level", "seniority")).strip())
-        remote_value = str(_first_value(raw, "remote", "workplace_type", "workplaceType", "work_type")).lower()
+        exp = extract_experience(description + " " + str(_first_value(raw, "experienceLevel", "experience", "yearsOfExperience")).strip())
+        if isinstance(raw.get("yearsOfExperience"), list) and raw["yearsOfExperience"]:
+            try:
+                exp = float(re.search(r"\\d+(?:\\.\\d+)?", str(raw["yearsOfExperience"][0])).group())
+            except Exception:
+                pass
+        remote_value = str(_first_value(raw, "isRemote", "remote", "workplaceType", "workplace_type", "workType")).lower()
         work_mode = "Remote" if "remote" in remote_value or "remote" in (location + " " + description).lower() else ""
-        external_id = str(_first_value(raw, "job_id", "jobId", "linkedin_job_id", "id")).strip()
+        external_id = str(_first_value(raw, "jobId", "job_id", "linkedin_job_id", "id")).strip()
+        usable_apply = apply_url if apply_url and "linkedin.com/jobs" not in apply_url.lower() else ""
         jobs.append({
-            "external_id": "linkedin:" + (external_id or job_fingerprint({"company": company, "title": title, "url": url})),
+            "external_id": "linkedin:" + (external_id or job_fingerprint({"company": company, "title": title, "url": linkedin_url})),
             "source": "LinkedIn",
-            "title": title,
-            "company": company,
-            "location": location,
-            "work_mode": work_mode,
-            "salary_min": smin,
-            "salary_max": smax,
-            "experience_min": exp,
-            "url": url,
-            "description": description or title,
-            "posted_at": str(_first_value(raw, "posted_date", "postedAt", "date_posted", "datePosted")).strip(),
-            "employment_type": str(_first_value(raw, "employment_type", "employmentType", "job_type")).strip(),
-            "seniority": str(_first_value(raw, "seniority_level", "seniority", "experience_level")).strip(),
+            "source_url": linkedin_url,
+            "title": title, "company": company, "location": location, "work_mode": work_mode,
+            "salary_min": smin, "salary_max": smax, "experience_min": exp,
+            "url": usable_apply or linkedin_url, "description": description or title,
+            "application_url": usable_apply,
+            "application_type": str(_first_value(raw, "applyType", "applicationType")).strip(),
+            "posted_at": str(_first_value(raw, "postedAt", "postedDate", "publishedAt", "posted_date")).strip(),
+            "employment_type": str(_first_value(raw, "employmentType", "contractType", "job_type")).strip(),
+            "seniority": str(_first_value(raw, "seniorityLevel", "experienceLevel", "seniority")).strip(),
         })
     return jobs
 
 
 def search_linkedin_jobs(query, location="", remote=False):
-    if not BRIGHTDATA_API_KEY:
-        return [], [{"source": "LinkedIn", "error": "BRIGHTDATA_API_KEY is not configured"}], [{"source": "LinkedIn", "found": 0, "configured": False, "provider": "Bright Data"}]
-    filters = [{"name": "job_title", "operator": "includes", "value": query}]
+    if not APIFY_API_TOKEN:
+        return [], [{"source": "LinkedIn", "error": "APIFY_API_TOKEN is not configured"}], [{"source": "LinkedIn", "found": 0, "configured": False, "provider": "Apify"}]
+    from urllib.parse import quote_plus
+    search_url = "https://www.linkedin.com/jobs/search/?keywords=" + quote_plus(query)
     if location:
-        filters.append({"name": "location", "operator": "in", "value": [location]})
+        search_url += "&location=" + quote_plus(location)
     payload = {
-        "dataset_id": BRIGHTDATA_DATASET_ID,
-        "records_limit": 100,
-        "filter": {"operator": "and", "filters": filters},
+        "urls": [search_url],
+        "count": 50,
+        "scrapeCompany": False,
+        "autoConvertToAiSearch": True,
     }
+    endpoint = "https://api.apify.com/v2/acts/" + APIFY_LINKEDIN_ACTOR + "/run-sync-get-dataset-items?token=" + quote_plus(APIFY_API_TOKEN)
     try:
-        data = post_json("https://api.brightdata.com/datasets/filter", payload,
-                         headers={"Authorization": "Bearer " + BRIGHTDATA_API_KEY}, timeout=90)
+        data = post_json(endpoint, payload, timeout=120)
         rows = normalize_linkedin_jobs(data)
         filtered = []
         for job in rows:
             if location_matches(job, location, remote):
                 job["_query"] = query
                 filtered.append(job)
-        return filtered, [], [{"source": "LinkedIn", "found": len(filtered), "configured": True, "provider": "Bright Data"}]
+        return filtered, [], [{"source": "LinkedIn", "found": len(filtered), "configured": True, "provider": "Apify"}]
     except Exception as exc:
-        return [], [{"source": "LinkedIn", "error": str(exc)[:1000]}], [{"source": "LinkedIn", "found": 0, "configured": True, "provider": "Bright Data"}]
+        return [], [{"source": "LinkedIn", "error": str(exc)[:1000]}], [{"source": "LinkedIn", "found": 0, "configured": True, "provider": "Apify"}]
 
 
 def normalize_remotive_jobs(data):
@@ -679,10 +677,10 @@ def import_job_items(items):
         try:
             c.execute(
                 """INSERT INTO jobs(external_id,source,title,company,location,work_mode,salary_min,salary_max,
-                experience_min,url,description,discovered_at,match_score,status,skip_reason,match_reasons,matched_skills)
+                experience_min,source_url,url,description,discovered_at,match_score,status,skip_reason,match_reasons,matched_skills)
                 VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                 (ext, j.get("source", "manual"), j["title"], j["company"], j.get("location", ""),
-                 j.get("work_mode", ""), smin, smax, exp, j["url"], j["description"], utcnow(), sc, status,
+                 j.get("work_mode", ""), smin, smax, exp, j.get("source_url", j["url"]), j["url"], j["description"], utcnow(), sc, status,
                  "; ".join(reasons), json.dumps(reasons), json.dumps(matched)),
             )
             inserted = c.execute("SELECT id FROM jobs WHERE external_id=?", (ext,)).fetchone()
@@ -791,8 +789,8 @@ def config_status():
         "resume_configured": resume_file_path().is_file(),
         "supported_browser_adapters": ["greenhouse", "lever"],
         "discovery_sources": {
-            "LinkedIn": bool(BRIGHTDATA_API_KEY),
-            "LinkedIn_provider": "Bright Data",
+            "LinkedIn": bool(APIFY_API_TOKEN),
+            "LinkedIn_provider": "Apify (" + APIFY_LINKEDIN_ACTOR + ")",
             "legacy_sources_enabled": ENABLE_LEGACY_SOURCES,
             "Adzuna": bool(ADZUNA_APP_ID and ADZUNA_APP_KEY),
             "Greenhouse": len(GREENHOUSE_BOARDS),
@@ -974,4 +972,3 @@ def submit_with_browser(job, answers):
                     "message": "Submit action completed; no standard confirmation phrase was detected."}
     except Exception as exc:
         return {"status": "failed", "adapter": adapter, "message": str(exc)[:1000]}
-
