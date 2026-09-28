@@ -278,20 +278,144 @@ def make_answers(job):
 
 
 def build_search_links(query, location="", remote=False):
-    from urllib.parse import quote_plus
-    q = quote_plus(query.strip() or "QA Automation Engineer")
-    loc = quote_plus(location.strip())
-    linkedin = f"https://www.linkedin.com/jobs/search/?keywords={q}"
-    if location.strip():
-        linkedin += f"&location={loc}"
-    if remote:
-        linkedin += "&f_WT=2"
-    google_query = quote_plus("site:linkedin.com/jobs/view " + (query.strip() or "QA Automation Engineer") + ((" " + location.strip()) if location.strip() else ""))
+    # Kept only for backwards-compatible API consumers. Discovery itself is now
+    # performed server-side by authorized job APIs and configured feeds.
     return {
-        "linkedin": linkedin,
-        "google_linkedin": f"https://www.google.com/search?q={google_query}",
-        "note": "These are user-initiated search links. ApplyBot does not scrape LinkedIn or use session cookies."
+        "mode": "in_app",
+        "query": query.strip() or "QA Automation Engineer",
+        "location": location.strip() or "India",
+        "remote": bool(remote),
+        "note": "ApplyBot performs discovery inside the application using authorized APIs and configured feeds."
     }
+
+
+def strip_html(text):
+    return re.sub(r"<[^>]+>", " ", text or "").replace("&nbsp;", " ").strip()
+
+
+def parse_salary_text(text):
+    if not text:
+        return None, None
+    numbers = []
+    for raw in re.findall(r"(\d[\d,]*(?:\.\d+)?)", text.replace(",", "")):
+        try:
+            numbers.append(float(raw))
+        except ValueError:
+            pass
+    if not numbers:
+        return None, None
+    return min(numbers), max(numbers)
+
+
+def fetch_json(url, params=None):
+    from urllib.parse import urlencode
+    target = url
+    if params:
+        target += ("&" if "?" in target else "?") + urlencode(params)
+    req = urllib.request.Request(
+        target,
+        headers={
+            "User-Agent": "ApplyBot/1.0 (+in-app job discovery)",
+            "Accept": "application/json",
+        },
+    )
+    with urllib.request.urlopen(req, timeout=25) as response:
+        return json.loads(response.read().decode("utf-8"))
+
+
+def normalize_remotive_jobs(data):
+    jobs = []
+    for raw in data.get("jobs", []):
+        description = strip_html(raw.get("description", ""))
+        smin, smax = parse_salary_text(raw.get("salary", ""))
+        jobs.append({
+            "external_id": "remotive:" + str(raw.get("id", "")),
+            "source": "Remotive",
+            "title": (raw.get("title") or "").strip(),
+            "company": (raw.get("company_name") or "Unknown").strip(),
+            "location": (raw.get("candidate_required_location") or "Remote").strip(),
+            "work_mode": "Remote",
+            "salary_min": smin,
+            "salary_max": smax,
+            "url": raw.get("url", ""),
+            "description": description,
+        })
+    return jobs
+
+
+def normalize_arbeitnow_jobs(data):
+    jobs = []
+    for raw in data.get("data", []):
+        description = strip_html(raw.get("description", ""))
+        jobs.append({
+            "external_id": "arbeitnow:" + str(raw.get("slug") or raw.get("id") or raw.get("url", "")),
+            "source": "Arbeitnow",
+            "title": (raw.get("title") or "").strip(),
+            "company": (raw.get("company_name") or raw.get("company") or "Unknown").strip(),
+            "location": (raw.get("location") or "").strip(),
+            "work_mode": "Remote" if raw.get("remote") else "",
+            "salary_min": None,
+            "salary_max": None,
+            "url": raw.get("url", ""),
+            "description": description,
+        })
+    return jobs
+
+
+def location_matches(job, location, remote=False):
+    requested = (location or "").strip().lower()
+    text = ((job.get("location") or "") + " " + (job.get("description") or "")).lower()
+    if remote and job.get("work_mode", "").lower() == "remote":
+        return True
+    if not requested:
+        return True
+    if requested in {"india", "ind"}:
+        return any(x in text for x in ["india", "indian", "bangalore", "bengaluru", "pune", "hyderabad", "mumbai", "delhi", "noida", "gurugram", "gurgaon", "chennai", "indore"])
+    return requested in text
+
+
+def search_public_sources(query, location="", remote=False):
+    query = (query or "").strip() or "QA Automation Engineer"
+    results = []
+    errors = []
+
+    # Remotive is an authorized public API with keyword search. Keep requests
+    # bounded because the provider asks clients not to poll excessively.
+    try:
+        data = fetch_json(
+            "https://remotive.com/api/remote-jobs",
+            {"search": query, "limit": "50"},
+        )
+        results.extend(normalize_remotive_jobs(data))
+    except Exception as exc:
+        errors.append({"source": "Remotive", "error": str(exc)})
+
+    # Arbeitnow is a public job-board API. Its free API returns a normalized
+    # collection from multiple ATS sources; ApplyBot filters locally.
+    try:
+        data = fetch_json("https://www.arbeitnow.com/api/job-board-api")
+        arbeit = normalize_arbeitnow_jobs(data)
+        q_tokens = [x for x in re.findall(r"[a-zA-Z0-9+#.-]+", query.lower()) if x not in STOPWORDS]
+        for job in arbeit:
+            haystack = (job["title"] + " " + job["description"]).lower()
+            if not q_tokens or any(token in haystack for token in q_tokens):
+                results.append(job)
+    except Exception as exc:
+        errors.append({"source": "Arbeitnow", "error": str(exc)})
+
+    filtered = []
+    seen = set()
+    for job in results:
+        if not job.get("title") or not job.get("company") or not job.get("url"):
+            continue
+        if not location_matches(job, location, remote):
+            continue
+        key = job.get("external_id") or job_fingerprint(job)
+        if key in seen:
+            continue
+        seen.add(key)
+        filtered.append(job)
+    return filtered, errors
 
 
 def parse_feed(url):
@@ -384,6 +508,27 @@ def search_links():
     return jsonify(build_search_links(query, location, remote))
 
 
+@app.post("/api/discover/search")
+def discover_search():
+    body = request.get_json(silent=True) or {}
+    query = str(body.get("query") or "QA Automation Engineer").strip()
+    location = str(body.get("location") or "India").strip()
+    remote = bool(body.get("remote", False))
+    items, errors = search_public_sources(query, location, remote)
+    results = import_job_items(items)
+    return jsonify({
+        "mode": "in_app",
+        "query": query,
+        "location": location,
+        "remote": remote,
+        "sources_checked": ["Remotive", "Arbeitnow"],
+        "items_seen": len(items),
+        "new_jobs": len(results),
+        "errors": errors,
+        "results": results,
+    })
+
+
 @app.get("/api/jobs")
 def jobs():
     c = db()
@@ -453,18 +598,41 @@ def add_feed():
 
 @app.post("/api/discover")
 def discover():
+    # One click performs the complete in-app discovery pipeline:
+    # public APIs + user-configured RSS/Atom feeds -> normalize -> filter -> score -> store.
+    body = request.get_json(silent=True) or {}
+    query = str(body.get("query") or "QA Automation Engineer").strip()
+    location = str(body.get("location") or "India").strip()
+    remote = bool(body.get("remote", False))
+
+    api_items, errors = search_public_sources(query, location, remote)
+
     c = db()
     enabled_clause = "enabled=TRUE" if c.pg else "enabled=1"
     feeds = c.execute(f"SELECT * FROM feed_sources WHERE {enabled_clause}").fetchall()
     c.close()
-    all_items, errors = [], []
+
+    feed_items = []
     for feed in feeds:
         try:
-            all_items.extend(parse_feed(feed["url"]))
+            feed_items.extend(parse_feed(feed["url"]))
         except Exception as exc:
             errors.append({"feed": feed["name"], "error": str(exc)})
-    results = import_job_items(all_items)
-    return jsonify({"feeds_checked": len(feeds), "items_seen": len(all_items), "new_jobs": len(results), "errors": errors, "results": results})
+
+    combined = api_items + feed_items
+    results = import_job_items(combined)
+    return jsonify({
+        "mode": "in_app",
+        "query": query,
+        "location": location,
+        "remote": remote,
+        "api_sources_checked": ["Remotive", "Arbeitnow"],
+        "feeds_checked": len(feeds),
+        "items_seen": len(combined),
+        "new_jobs": len(results),
+        "errors": errors,
+        "results": results,
+    })
 
 
 @app.post("/api/jobs/<int:job_id>/prepare")
