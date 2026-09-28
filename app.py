@@ -761,7 +761,7 @@ def submit_with_browser(job, answers):
         return {"status": "failed", "adapter": adapter, "message": str(exc)[:1000]}
 
 
-def auto_apply_job(job_id, threshold=70):
+def auto_apply_job(job_id, threshold=70, max_experience=2, min_salary=3):
     c = db()
     r = c.execute("SELECT * FROM jobs WHERE id=?", (job_id,)).fetchone()
     if not r:
@@ -772,6 +772,14 @@ def auto_apply_job(job_id, threshold=70):
     if score < float(threshold):
         c.close()
         return {"ok": False, "status": "below_threshold", "score": score, "threshold": threshold}
+    max_experience = float(max_experience)
+    min_salary = max(float(min_salary), CANDIDATE["minimum_ctc_lpa"])
+    if job.get("experience_min") is not None and float(job["experience_min"]) > max_experience:
+        c.close()
+        return {"ok": False, "status": "experience_filter", "message": "Job exceeds the configured maximum experience requirement."}
+    if job.get("salary_max") is not None and float(job["salary_max"]) < min_salary:
+        c.close()
+        return {"ok": False, "status": "salary_filter", "message": "Job is below the configured minimum salary requirement."}
 
     answers = make_answers(job)
     answers["cover_letter"] = (
@@ -845,6 +853,18 @@ def auto_apply_job(job_id, threshold=70):
         "message": result.get("message"),
         "submitted": status == "submitted",
     }
+
+@app.post("/api/jobs/<int:job_id>/auto-apply")
+def auto_apply(job_id):
+    body = request.get_json(silent=True) or {}
+    result = auto_apply_job(
+        job_id,
+        float(body.get("threshold", 70)),
+        float(body.get("max_experience", 2)),
+        float(body.get("min_salary", 3)),
+    )
+    return jsonify(result)
+
 
 @app.post("/api/jobs/<int:job_id>/prepare")
 def prepare(job_id):
