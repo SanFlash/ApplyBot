@@ -17,8 +17,9 @@ button.secondary{background:#202d47;color:#dce8ff}.pill{padding:5px 8px;border-r
 .modal.on{display:flex}.modalbox{max-width:980px;width:100%;max-height:90vh;overflow:auto;background:#10192c;border:1px solid var(--line);border-radius:18px;padding:24px}
 .tabs{display:flex;gap:8px;flex-wrap:wrap;margin:15px 0}.tab{background:#1a2740;color:#cfe0fb}.tab.active{background:#76a9ff;color:#071021}
 .pre{white-space:pre-wrap;background:#0a1120;border:1px solid var(--line);padding:14px;border-radius:10px}.actions{display:flex;justify-content:flex-end;gap:8px;margin-top:15px}
-input{width:100%;padding:11px;border-radius:10px;border:1px solid var(--line);background:#0a1120;color:var(--text);outline:none}
-@media(max-width:900px){.grid{grid-template-columns:repeat(2,1fr)}.job{grid-template-columns:1fr 1fr}.job button{grid-column:1/-1;width:100%}}
+input,textarea{width:100%;padding:11px;border-radius:10px;border:1px solid var(--line);background:#0a1120;color:var(--text);outline:none}
+textarea{min-height:130px;resize:vertical}.searchbox{margin-top:16px;padding:16px;border:1px solid var(--line);border-radius:14px;background:#0b1324}.searchrow,.feedrow{display:grid;grid-template-columns:1.5fr 1fr auto;gap:8px}.searchactions{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}.hint{font-size:12px;color:var(--muted);margin-top:9px}.check{display:flex;align-items:center;gap:7px;padding:0 10px;color:#cfe0fb;font-size:13px;white-space:nowrap}.check input{width:auto}.divider{height:1px;background:var(--line);margin:18px 0}.subhead{font-weight:700;margin-bottom:8px}.manualgrid{display:grid;grid-template-columns:1fr 1fr;gap:8px}.manualgrid textarea{grid-column:1/-1}
+@media(max-width:900px){.grid{grid-template-columns:repeat(2,1fr)}.job{grid-template-columns:1fr 1fr}.job button{grid-column:1/-1;width:100%}.searchrow,.feedrow{grid-template-columns:1fr 1fr}.check{padding:8px 0}.manualgrid{grid-template-columns:1fr}.manualgrid textarea{grid-column:auto}}
 @media(max-width:560px){.grid{grid-template-columns:1fr}.wrap{padding:20px 4vw}header{padding:18px 4vw}.brand{font-size:18px}.modalbox{padding:18px}}
 </style>
 </head>
@@ -33,15 +34,41 @@ input{width:100%;padding:11px;border-radius:10px;border:1px solid var(--line);ba
 </section>
 <section class="card" style="margin-top:20px">
 <div style="display:flex;justify-content:space-between;gap:12px;align-items:center;flex-wrap:wrap">
-<div><h2 style="margin:0 0 5px">Discovery</h2><div class="muted">Add an authorized RSS/Atom job feed, then discover and score new jobs.</div></div>
+<div><h2 style="margin:0 0 5px">Job Discovery</h2><div class="muted">Search job sources, open LinkedIn with your criteria, or add an authorized feed.</div></div>
 <div style="display:flex;gap:8px"><button onclick="discover()">Discover jobs</button><button class="secondary" onclick="load()">Refresh</button></div>
 </div>
-<div style="display:grid;grid-template-columns:1fr 2fr auto;gap:8px;margin-top:14px">
+<div class="searchbox">
+<div class="searchrow">
+<input id="searchQuery" value="QA Automation Engineer" placeholder="Role / keywords">
+<input id="searchLocation" value="India" placeholder="Location">
+<label class="check"><input id="searchRemote" type="checkbox"> Remote</label>
+</div>
+<div class="searchactions">
+<button onclick="openLinkedIn()">Search LinkedIn</button>
+<button class="secondary" onclick="openGoogleLinkedIn()">Search via Google</button>
+</div>
+<div class="hint">LinkedIn search is user-initiated. ApplyBot does not collect passwords/cookies or scrape LinkedIn.</div>
+</div>
+<div class="divider"></div>
+<div class="subhead">Authorized RSS / Atom feed</div>
+<div class="feedrow">
 <input id="feedName" placeholder="Feed name">
-<input id="feedUrl" placeholder="https://example.com/jobs/feed.xml">
+<input id="feedUrl" placeholder="https://company.example/jobs/feed.xml">
 <button class="secondary" onclick="addFeed()">Add feed</button>
 </div>
 <div id="feedStatus" class="muted" style="margin-top:10px"></div>
+<div class="divider"></div>
+<div class="subhead">Analyze a job you found</div>
+<div class="manualgrid">
+<input id="manualTitle" placeholder="Job title">
+<input id="manualCompany" placeholder="Company">
+<input id="manualLocation" placeholder="Location">
+<input id="manualWorkMode" placeholder="Remote / Hybrid / On-site">
+<input id="manualUrl" placeholder="Job URL">
+<textarea id="manualDescription" placeholder="Paste the job description here"></textarea>
+</div>
+<div class="searchactions"><button class="secondary" onclick="importManual()">Analyze & add job</button></div>
+<div class="hint">Paste details from a job you are authorized to view, including a LinkedIn job. ApplyBot will score it and prepare the application.</div>
 </section>
 <section class="card" style="margin-top:20px">
 <div style="display:flex;justify-content:space-between;align-items:center"><div><h2 style="margin:0 0 5px">Application Queue</h2><div class="muted">Imported jobs are evaluated against your profile and rules.</div></div></div>
@@ -60,9 +87,14 @@ async function load(){
  const [jr,ar]=await Promise.all([fetch('/api/jobs').then(r=>r.json()),fetch('/api/applications').then(r=>r.json())]);
  document.querySelector('#k1').textContent=jr.length;document.querySelector('#k2').textContent=jr.filter(x=>x.status==='ready'||x.status==='application_ready').length;document.querySelector('#k3').textContent=ar.length;
  const el=document.querySelector('#jobs');
- if(!jr.length){el.innerHTML='<div class="empty">No jobs discovered yet. Add an authorized RSS/Atom feed above.</div>';return}
+ if(!jr.length){el.innerHTML='<div class="empty">No jobs yet. Search LinkedIn above or add an authorized feed, then analyze jobs you want to track.</div>';return}
  el.innerHTML=jr.map(j=>`<div class="card job"><div><b>${esc(j.title)}</b><div class="muted">${esc(j.company)} · ${esc(j.location||'Location undisclosed')}</div></div><div><span class="pill">${esc(j.status)}</span></div><div class="score">${Math.round(j.match_score)}%</div><div>${j.salary_min||j.salary_max?'₹'+(j.salary_min||'')+'–'+(j.salary_max||'')+' LPA':'Salary TBD'}</div><button onclick="prepare(${j.id})">Prepare application</button></div>`).join('')
 }
+async function openLinkedIn(){const x=await searchLinks();if(x?.linkedin)window.open(x.linkedin,'_blank','noopener');}
+async function openGoogleLinkedIn(){const x=await searchLinks();if(x?.google_linkedin)window.open(x.google_linkedin,'_blank','noopener');}
+async function searchLinks(){const q=encodeURIComponent(document.querySelector('#searchQuery').value.trim()),l=encodeURIComponent(document.querySelector('#searchLocation').value.trim()),r=document.querySelector('#searchRemote').checked;return fetch('/api/search-links?query='+q+'&location='+l+'&remote='+r).then(x=>x.json())}
+async function importManual(){const body={title:document.querySelector('#manualTitle').value.trim(),company:document.querySelector('#manualCompany').value.trim(),location:document.querySelector('#manualLocation').value.trim(),work_mode:document.querySelector('#manualWorkMode').value.trim(),url:document.querySelector('#manualUrl').value.trim(),description:document.querySelector('#manualDescription').value.trim(),source:'user-assisted'};if(!body.title||!body.company||!body.url||!body.description)return alert('Enter title, company, job URL and job description.');const r=await fetch('/api/jobs/manual',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});const x=await r.json();document.querySelector('#feedStatus').textContent=x.error||('Job analyzed. '+x.imported+' new job added.');load()}
+
 async function addFeed(){const name=document.querySelector('#feedName').value.trim(),url=document.querySelector('#feedUrl').value.trim();if(!name||!url){return alert('Enter a feed name and URL.')}const r=await fetch('/api/feeds',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name,url,source_type:'rss'})});const x=await r.json();document.querySelector('#feedStatus').textContent=x.ok?'Feed added. Click Discover jobs.':(x.error||'Could not add feed.')}
 async function discover(){document.querySelector('#feedStatus').textContent='Checking enabled feeds...';const r=await fetch('/api/discover',{method:'POST'}),x=await r.json();document.querySelector('#feedStatus').textContent=`Checked ${x.feeds_checked} feeds · saw ${x.items_seen} items · added ${x.new_jobs} new jobs`+(x.errors?.length?' · Some feeds returned errors.':'');load()}
 async function prepare(id){const x=await fetch('/api/jobs/'+id+'/prepare',{method:'POST'}).then(r=>r.json());if(x.error)return alert(x.error);currentApp=x;document.querySelector('#mmeta').textContent='Draft ID: '+x.application_id;document.querySelector('#tab-summary').innerHTML='<div class="pre">'+esc(x.summary)+'</div>';document.querySelector('#tab-cover').innerHTML='<div class="pre">'+esc(x.cover_letter)+'</div>';document.querySelector('#tab-answers').innerHTML=Object.entries(x.answers).map(([k,v])=>'<p><b>'+esc(k.replaceAll('_',' '))+'</b></p><div class="pre">'+esc(v)+'</div>').join('');document.querySelector('#modal').classList.add('on');load()}
