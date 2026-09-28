@@ -47,17 +47,17 @@ For every discovered job the dashboard shows:
 
 Primary discovery source:
 
-- **LinkedIn Jobs via Bright Data Jobs Data API** — ApplyBot sends the desired keywords and location to the managed API and receives structured LinkedIn job records. Bright Data documents LinkedIn Jobs retrieval with job-title/location filtering and structured job information. urlBright Data Jobs Data APIhttps://brightdata.com/products/data-feeds/jobs-data-api
+- **LinkedIn Jobs via Apify** — ApplyBot sends the desired LinkedIn search URL to a maintained Apify LinkedIn Jobs actor and receives structured job records. The selected actor supports public LinkedIn job-search URLs, result limits and programmatic API execution. urlApify LinkedIn Jobs Scraper APIhttps://apify.com/curious_coder/linkedin-jobs-scraper/api/openapi
 - Legacy sources (Adzuna, Greenhouse, Lever, Remotive and Arbeitnow) are **disabled by default** so broad unrelated listings do not pollute a LinkedIn-focused search. They can be explicitly enabled with `ENABLE_LEGACY_SOURCES=true`.
 
-`BRIGHTDATA_API_KEY` is required for live LinkedIn discovery. The default dataset ID is `gd_m487ihp32jtc4ujg45`; it can be overridden with `BRIGHTDATA_LINKEDIN_DATASET_ID`.
+`APIFY_API_TOKEN` is required for live LinkedIn discovery. `APIFY_LINKEDIN_ACTOR` defaults to `curious_coder~linkedin-jobs-search-scraper`.
 
 Discovery flow:
 
 ```text
 User query + location
        ↓
-Bright Data LinkedIn Jobs API
+Apify LinkedIn Jobs API
        ↓
 Normalize LinkedIn records
        ↓
@@ -70,7 +70,7 @@ Threshold-qualified queue
 Supported ATS application
 ```
 
-ApplyBot does **not** claim to call a public official LinkedIn Job Search API. A managed data provider is used as the LinkedIn data layer instead. Bright Data currently documents LinkedIn Jobs retrieval through its Jobs Data API. citeturn0search0turn0search15
+ApplyBot does **not** claim to call a public official LinkedIn Job Search API. A managed data provider is used as the LinkedIn data layer instead. The selected Apify actor exposes a programmatic API and supports LinkedIn search inputs. citeturn10view0turn8search3
 
 ## Matching
 
