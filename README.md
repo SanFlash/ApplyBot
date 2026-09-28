@@ -281,6 +281,92 @@ Example:
 }
 ```
 
+### What should I enter in the Feed URL field?
+
+The **Feed URL field is not a normal job-search URL**.
+
+It must point to an **RSS or Atom XML feed** that you are authorized to access. The feed should contain individual job entries.
+
+Valid examples of the *format* are:
+
+```
+https://company.example/jobs/feed.xml
+https://company.example/careers/rss
+https://jobs.example.com/atom.xml
+```
+
+These are examples of URL patterns only; they are not guaranteed to be live feeds.
+
+#### How to tell if a URL is a real feed
+
+Open the URL in your browser.
+
+A valid feed normally returns XML containing elements such as:
+
+```xml
+<rss>
+  <channel>
+    <item>
+      <title>QA Automation Engineer</title>
+      <link>https://company.example/jobs/123</link>
+      <description>Playwright, Python, API testing...</description>
+    </item>
+  </channel>
+</rss>
+```
+
+An Atom feed may look like:
+
+```xml
+<feed>
+  <entry>
+    <title>QA Automation Engineer</title>
+    <link href="https://company.example/jobs/123"/>
+    <summary>Playwright, Python, API testing...</summary>
+  </entry>
+</feed>
+```
+
+If the URL opens a normal HTML careers page or a normal LinkedIn Jobs search page, **do not put that URL into the Feed URL field**.
+
+#### Where can I get a feed?
+
+Look on an authorized job source for labels such as:
+
+- RSS
+- RSS Feed
+- Job Feed
+- Atom
+- Subscribe to jobs
+- Careers feed
+- Jobs API
+
+Company ATS platforms or job boards may expose feeds or APIs. Use only sources whose access and automated use you are permitted to use.
+
+#### Example workflow
+
+```
+1. Find a company/ATS that provides an authorized RSS feed
+              ↓
+2. Copy the actual .xml / RSS / Atom feed URL
+              ↓
+3. ApplyBot → Job Discovery
+              ↓
+4. Enter feed name
+   Example: "Example Corp Jobs"
+              ↓
+5. Enter feed URL
+   Example: "https://company.example/jobs/feed.xml"
+              ↓
+6. Click "Add feed"
+              ↓
+7. Click "Discover jobs"
+              ↓
+8. ApplyBot imports and scores the jobs
+```
+
+**Important:** `https://www.linkedin.com/jobs/search/...` is a search page, not an RSS feed. Use the **Search LinkedIn** button in ApplyBot instead, then use **Analyze a job you found** for jobs you want to evaluate.
+
 ### 3. Authorized RSS/Atom feeds
 
 For sources that provide a permitted RSS/Atom feed:
