@@ -83,7 +83,7 @@ async function loadConfig(){
   ['Email',c.candidate_email_configured,c.candidate_email_configured?'Configured':'Missing'],
   ['Phone',c.candidate_phone_configured,c.candidate_phone_configured?'Configured':'Missing'],
   ['Resume',c.resume_configured,c.resume_configured?'Configured':'Missing'],
-  ['Jobicy provider',c.discovery_sources && c.discovery_sources.Jobicy,c.discovery_sources && c.discovery_sources.Jobicy ? 'Free API configured' : 'Unavailable'],
+  ['Jobicy provider',c.discovery_sources && c.discovery_sources.Jobicy,(c.discovery_sources && c.discovery_sources.Jobicy_direct_application_urls) ? 'Commercial API · direct ATS URLs' : 'Public API · Jobicy listings'],
   ['ATS adapters',true,c.supported_browser_adapters.join(', ')]
  ].map(x=>'<div class="check '+(x[1]?'ok':'bad')+'"><b>'+esc(x[0])+'</b><br>'+esc(x[2])+'</div>').join('');
 }
@@ -122,7 +122,8 @@ async function discover(auto){
  const r=await fetch('/api/discover',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
  const x=await r.json();
  if(!r.ok){$('status').textContent=x.error||'Discovery failed';return}
- $('status').textContent='Found '+x.items_seen+' listings. '+(x.sources_checked||[]).map(v=>v.source+': '+v.found+(v.configured?'':' (not configured)')).join(' · ')+' · '+x.qualified_jobs+' qualified at '+x.threshold+'%+.';
+ const provider=(x.sources_checked||[]).map(v=>v.source+': '+v.found+(v.raw_found!=null?' raw/'+v.raw_found:'')+(v.configured?'':' (not configured)')).join(' · ');
+ $('status').textContent='Found '+x.items_seen+' listings. '+provider+' · '+x.qualified_jobs+' qualified at '+x.threshold+'%+.'+(x.errors&&x.errors.length?' Provider error: '+x.errors.map(e=>e.error||e.source).join(' | '):'');
  await loadJobs();
  if(auto){
   const candidates=(x.results||[]).filter(j=>j.qualified && j.job_id).slice(0,Number(val('maxApply')||3));
