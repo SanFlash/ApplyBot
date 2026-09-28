@@ -199,3 +199,33 @@ def test_auto_apply_is_threshold_gated(tmp_path, monkeypatch):
     assert r.status_code == 200
     assert r.json["status"] == "below_threshold"
     assert r.json["status"] == "below_threshold"
+
+
+def test_supported_adapter_detection():
+    assert applybot.detect_application_adapter("https://boards.greenhouse.io/example/jobs/123") == "greenhouse"
+    assert applybot.detect_application_adapter("https://jobs.lever.co/example/abc/apply") == "lever"
+    assert applybot.detect_application_adapter("https://example.com/jobs/123") == "unsupported"
+
+
+def test_auto_apply_prepares_when_disabled(tmp_path, monkeypatch):
+    client = setup_db(tmp_path, monkeypatch)
+    monkeypatch.setattr(applybot, "AUTO_APPLY_ENABLED", False)
+    job = {
+        "external_id": "auto-1",
+        "source": "Greenhouse",
+        "title": "QA Automation Engineer",
+        "company": "Example",
+        "location": "Indore",
+        "work_mode": "Hybrid",
+        "salary_min": 4,
+        "salary_max": 6,
+        "experience_min": 1,
+        "url": "https://boards.greenhouse.io/example/jobs/123",
+        "description": "Playwright Python API testing",
+    }
+    client.post("/api/jobs/import", json={"jobs": [job]})
+    row = client.get("/api/jobs").json[0]
+    r = client.post(f"/api/jobs/{row['id']}/auto-apply", json={"threshold": 70})
+    assert r.status_code == 200
+    assert r.json["status"] == "application_ready"
+    assert r.json["submitted"] is False
