@@ -91,7 +91,9 @@ class DB:
     def execute(self, sql, params=()):
         if self.pg:
             sql = sql.replace("?", "%s")
-            return self.conn.cursor(cursor_factory=self.cursor_factory).execute(sql, params)
+            cur = self.conn.cursor(cursor_factory=self.cursor_factory)
+            cur.execute(sql, params)
+            return cur
         return self.conn.execute(sql, params)
 
     def commit(self):
@@ -124,7 +126,7 @@ def init_db():
               key TEXT PRIMARY KEY, value TEXT NOT NULL)""",
             """CREATE TABLE IF NOT EXISTS feed_sources (
               id BIGSERIAL PRIMARY KEY, name TEXT NOT NULL, url TEXT UNIQUE NOT NULL,
-              source_type TEXT NOT NULL DEFAULT 'rss', enabled BOOLEAN NOT NULL DEFAULT TRUE,
+              source_type TEXT NOT NULL DEFAULT 'rss', enabled INTEGER NOT NULL DEFAULT 1,
               created_at TEXT NOT NULL)""",
         ]
     else:
@@ -275,6 +277,23 @@ def make_answers(job):
     }
 
 
+def build_search_links(query, location="", remote=False):
+    from urllib.parse import quote_plus
+    q = quote_plus(query.strip() or "QA Automation Engineer")
+    loc = quote_plus(location.strip())
+    linkedin = f"https://www.linkedin.com/jobs/search/?keywords={q}"
+    if location.strip():
+        linkedin += f"&location={loc}"
+    if remote:
+        linkedin += "&f_WT=2"
+    google_query = quote_plus("site:linkedin.com/jobs/view " + (query.strip() or "QA Automation Engineer") + ((" " + location.strip()) if location.strip() else ""))
+    return {
+        "linkedin": linkedin,
+        "google_linkedin": f"https://www.google.com/search?q={google_query}",
+        "note": "These are user-initiated search links. ApplyBot does not scrape LinkedIn or use session cookies."
+    }
+
+
 def parse_feed(url):
     req = urllib.request.Request(url, headers={"User-Agent": "ApplyBot/1.0 (+personal job assistant)"})
     with urllib.request.urlopen(req, timeout=20) as response:
@@ -357,6 +376,14 @@ def profile():
     return jsonify(CANDIDATE)
 
 
+@app.get("/api/search-links")
+def search_links():
+    query = request.args.get("query", "QA Automation Engineer")
+    location = request.args.get("location", "India")
+    remote = request.args.get("remote", "false").lower() == "true"
+    return jsonify(build_search_links(query, location, remote))
+
+
 @app.get("/api/jobs")
 def jobs():
     c = db()
@@ -368,6 +395,30 @@ def jobs():
 @app.post("/api/jobs/import")
 def import_jobs():
     return jsonify({"imported": len((created := import_job_items((request.get_json(silent=True) or {}).get("jobs", [])))), "results": created})
+
+
+@app.post("/api/jobs/manual")
+def manual_job():
+    body = request.get_json(silent=True) or {}
+    required = ["title", "company", "url", "description"]
+    missing = [k for k in required if not str(body.get(k, "")).strip()]
+    if missing:
+        return jsonify({"error": "Missing required fields: " + ", ".join(missing)}), 400
+    job = {
+        "external_id": body.get("external_id") or body["url"],
+        "source": body.get("source", "user-assisted"),
+        "title": body["title"].strip(),
+        "company": body["company"].strip(),
+        "location": body.get("location", "").strip(),
+        "work_mode": body.get("work_mode", "").strip(),
+        "salary_min": body.get("salary_min"),
+        "salary_max": body.get("salary_max"),
+        "experience_min": body.get("experience_min"),
+        "url": body["url"].strip(),
+        "description": body["description"].strip(),
+    }
+    result = import_job_items([job])
+    return jsonify({"imported": len(result), "results": result})
 
 
 @app.get("/api/feeds")
@@ -439,13 +490,21 @@ I would welcome the opportunity to bring this practical QA and automation mindse
 Regards,
 Satyendra Kumar Namdeo"""
     now = utcnow()
-    c.execute(
-        "INSERT INTO applications(job_id,tailored_summary,cover_letter,answers_json,status,created_at,updated_at) VALUES(?,?,?,?,?,?,?)",
-        (job_id, summary, cover, json.dumps(answers), "draft", now, now),
-    )
+    if c.pg:
+        cur = c.execute(
+            "INSERT INTO applications(job_id,tailored_summary,cover_letter,answers_json,status,created_at,updated_at) "
+            "VALUES(?,?,?,?,?,?,?) RETURNING id",
+            (job_id, summary, cover, json.dumps(answers), "draft", now, now),
+        )
+        aid = cur.fetchone()["id"]
+    else:
+        cur = c.execute(
+            "INSERT INTO applications(job_id,tailored_summary,cover_letter,answers_json,status,created_at,updated_at) VALUES(?,?,?,?,?,?,?)",
+            (job_id, summary, cover, json.dumps(answers), "draft", now, now),
+        )
+        aid = cur.lastrowid
     c.execute("UPDATE jobs SET status=? WHERE id=?", ("application_ready", job_id))
     c.commit()
-    aid = c.execute("SELECT MAX(id) AS id FROM applications").fetchone()["id"]
     c.close()
     return jsonify({"application_id": aid, "summary": summary, "cover_letter": cover, "answers": answers})
 
