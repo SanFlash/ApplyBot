@@ -83,6 +83,7 @@ async function loadConfig(){
   ['Email',c.candidate_email_configured,c.candidate_email_configured?'Configured':'Missing'],
   ['Phone',c.candidate_phone_configured,c.candidate_phone_configured?'Configured':'Missing'],
   ['Resume',c.resume_configured,c.resume_configured?'Configured':'Missing'],
+  ['LinkedIn provider',c.discovery_sources && c.discovery_sources.LinkedIn,c.discovery_sources && c.discovery_sources.LinkedIn ? 'Bright Data configured' : 'Missing API key'],
   ['ATS adapters',true,c.supported_browser_adapters.join(', ')]
  ].map(x=>'<div class="check '+(x[1]?'ok':'bad')+'"><b>'+esc(x[0])+'</b><br>'+esc(x[2])+'</div>').join('');
 }
@@ -117,7 +118,7 @@ async function loadHistory(){
 async function loadAll(){await Promise.all([loadConfig(),loadJobs(),loadHistory()])}
 async function discover(auto){
  const payload={query:val('query')||'QA Automation Engineer',location:val('location')||'India',remote:$('remote').value==='true',threshold:Number(val('threshold')||70),max_experience:Number(val('maxExp')||2),min_salary:Number(val('minSalary')||3)};
- $('status').textContent='Fetching jobs from the configured sources and scoring them...';
+ $('status').textContent='Querying live LinkedIn Jobs data and scoring the returned listings...';
  const r=await fetch('/api/discover',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
  const x=await r.json();
  if(!r.ok){$('status').textContent=x.error||'Discovery failed';return}
