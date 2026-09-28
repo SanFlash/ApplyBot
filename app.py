@@ -327,7 +327,13 @@ def normalize_remotive_jobs(data):
     jobs = []
     for raw in data.get("jobs", []):
         description = strip_html(raw.get("description", ""))
-        smin, smax = parse_salary_text(raw.get("salary", ""))
+        salary_text = raw.get("salary", "") or ""
+        # Remotive salary values are generally USD. Do not store them in the
+        # LPA fields, otherwise the matcher/UI could mistake USD amounts for INR LPA.
+        if re.search(r"(₹|INR|LPA|LAKH)", salary_text, re.I):
+            smin, smax = parse_salary_text(salary_text)
+        else:
+            smin, smax = None, None
         jobs.append({
             "external_id": "remotive:" + str(raw.get("id", "")),
             "source": "Remotive",
