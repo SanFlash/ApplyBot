@@ -453,7 +453,8 @@ def add_feed():
 @app.post("/api/discover")
 def discover():
     c = db()
-    feeds = c.execute("SELECT * FROM feed_sources WHERE enabled=1").fetchall()
+    enabled_clause = "enabled=TRUE" if c.pg else "enabled=1"
+    feeds = c.execute(f"SELECT * FROM feed_sources WHERE {enabled_clause}").fetchall()
     c.close()
     all_items, errors = [], []
     for feed in feeds:
