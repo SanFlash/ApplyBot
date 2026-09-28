@@ -1,170 +1,163 @@
 # ApplyBot
 
-AI-assisted job discovery, matching, application preparation, and tracking workspace for Satyendra Kumar Namdeo.
+ApplyBot is an in-app job discovery, matching, application generation and supported-ATS auto-application system.
 
-ApplyBot is designed to reduce repetitive job-search work without fabricating candidate information or using unauthorized account automation.
+The workflow is:
 
-## Stage 2 now included
+```
+Search inside ApplyBot
+      ↓
+Fetch job listings
+      ↓
+Show SOURCE + URL + job details
+      ↓
+ApplyBot scoring
+      ↓
+Threshold + salary + experience filters
+      ↓
+Qualified queue
+      ↓
+Generate truthful application answers
+      ↓
+Detect supported ATS
+      ↓
+Fill public application form
+      ↓
+Submit when the form is unambiguous
+      ↓
+Record submitted / failed / requires-user-action
+```
 
-- SQLite for local development.
-- PostgreSQL/Supabase support through `DATABASE_URL`.
-- Persistent jobs, applications, settings, and feed-source tables.
-- - - - User-assisted job import for jobs found on LinkedIn or other authorized sources.
-- Duplicate protection using stable external IDs.
-- Job fingerprinting support.
-- Salary and experience extraction from descriptions.
-- Candidate-specific match scoring.
-- Application draft generation.
-- Application status tracking.
-- Health endpoint showing the active database.
-- CLI database initialization command.
-- Render/Gunicorn deployment support.
-- GitHub Actions test pipeline.
+## What it shows
 
-## Candidate configuration
+For every discovered job the dashboard shows:
 
-### Primary roles
+- Job title
+- Company
+- Location
+- Work mode
+- Source that supplied the listing
+- Original job URL
+- Match percentage
+- Match/rejection reasons
+- Matched skills
+- Salary when available
+- Detected application adapter
+- Final application status
 
-- QA Automation Engineer
-- Automation Tester
-- SDET
-- Software Tester
-- Test Engineer
-- AI-Assisted QA
-- AI-Assisted Tester
+Current discovery sources:
 
-### Secondary roles
+- **Remotive** public job API
+- **Arbeitnow** public job-board API
 
-- Frontend Designer
-- AI-Assisted Developer
-- Vibe Coding
+There is no RSS/Atom workflow in the current discovery path and ApplyBot does not open LinkedIn or Google as a discovery step.
 
-### Preferences
+## Matching
 
-| Setting | Value |
+Default candidate configuration:
+
+| Rule | Value |
 |---|---|
 | Experience | ~1 year |
-| Maximum role requirement | 2 years |
+| Maximum target experience | 2 years |
 | Expected CTC | ₹4–5 LPA |
 | Hard minimum CTC | ₹3 LPA |
 | Notice period | 45 days |
 | Locations | India, Indore, Bangalore, Pune, Remote |
 | Work preference | Hybrid |
 
-Unpaid internships are excluded.
+A job can be rejected when:
 
-## Architecture
+- The title does not match the configured target roles.
+- Required experience exceeds the configured limit.
+- Location does not match.
+- Published salary is below the hard minimum.
+
+A missing salary is not treated as a false salary match; it is shown as undisclosed.
+
+## Automatic application
+
+The repository now includes a real browser-based submission layer using Playwright.
+
+Supported public ATS adapters:
+
+- Greenhouse public application pages
+- Lever public application pages
+
+The adapter:
+
+1. Opens the job/application URL.
+2. Detects CAPTCHA/human-verification pages.
+3. Fills available candidate fields.
+4. Uploads the configured PDF resume.
+5. Fills known truthful application questions.
+6. Checks for remaining required fields.
+7. Stops instead of guessing when required information is unknown.
+8. Submits through the public application form when an unambiguous submit control exists.
+9. Records the outcome.
+
+It never attempts to bypass CAPTCHA, authentication, anti-bot challenges or session controls.
+
+### Important configuration
+
+Set these Render environment variables:
+
+```env
+DATABASE_URL=<your PostgreSQL/Supabase URL>
+
+AUTO_APPLY_ENABLED=true
+AUTO_APPLY_MAX=3
+
+CANDIDATE_EMAIL=<your email>
+CANDIDATE_PHONE=<your phone>
+```
+
+The dashboard also provides **Upload resume**. The uploaded PDF is stored as `data/resume.pdf` for the running service instance.
+
+For production, use a persistent disk or external private storage if the resume must survive service replacement/redeployment.
+
+## Render deployment
+
+The repository includes `render.yaml`.
+
+Build:
+
+```bash
+pip install --upgrade pip && pip install -r requirements.txt && playwright install chromium
+```
+
+Start:
+
+```bash
+gunicorn --bind 0.0.0.0:$PORT --workers 1 --timeout 120 app:app
+```
+
+The Render blueprint sets Python 3.13.3 through:
 
 ```
-Authorized Feed / ATS       LinkedIn Search (user initiated)
-        |                              |
-        v                              v
-   Feed Discovery API          User selects a job
-        |                              |
-        +--------------+---------------+
-                       v
-                 Job Analysis
-                       |
-                       v
-          Salary + Experience Extraction
-                       |
-                       v
-              Candidate Match Engine
-                       |
-             +---------+---------+
-             |                   |
-          Skip/reason        Ready match
-                                 |
-                                 v
-                       Application Queue
-                                 |
-                                 v
-                     Tailored Application Draft
-                                 |
-                                 v
-                           Human Review
-                                 |
-                                 v
-                     Application Tracking
-                                 |
-                                 v
-                       PostgreSQL / Supabase
+.python-version
 ```
 
-## Repository structure
+### Required Render secrets
 
-```
-ApplyBot/
-├── app.py
-├── web/
-│   └── index.html
-├── data/
-│   └── applybot.db          # local SQLite only
-├── test_app.py
-├── requirements.txt
-├── Dockerfile
-├── render.yaml
-├── .env.example
-├── .github/workflows/ci.yml
-└── README.md
-```
+Do not commit these:
+
+- `DATABASE_URL`
+- `CANDIDATE_EMAIL`
+- `CANDIDATE_PHONE`
 
 ## Local setup
-
-### 1. Clone
 
 ```bash
 git clone https://github.com/SanFlash/ApplyBot.git
 cd ApplyBot
-```
 
-### 2. Create virtual environment
-
-Windows:
-
-```powershell
 python -m venv .venv
-.venv\Scripts\activate
-```
+.venv\\Scripts\\activate
 
-macOS/Linux:
-
-```bash
-python3 -m venv .venv
-source .venv/bin/activate
-```
-
-### 3. Install
-
-```bash
 pip install -r requirements.txt
-```
+playwright install chromium
 
-### 4. Environment
-
-Copy `.env.example` to `.env`.
-
-For local SQLite, no database variable is required.
-
-For PostgreSQL:
-
-```env
-DATABASE_URL=postgresql://USER:PASSWORD@HOST:5432/DATABASE
-PORT=8000
-DEBUG=false
-```
-
-### 5. Initialize database
-
-The application initializes its tables on startup. You can also run:
-
-```bash
-flask --app app init-db
-```
-
-### 6. Run
-
-```bash
 python app.py
 ```
 
@@ -174,154 +167,84 @@ Open:
 http://localhost:8000
 ```
 
-## Database
+## API
 
-### Local
+### Discovery
 
-SQLite is used automatically when `DATABASE_URL` is not set.
-
-### Production
-
-Use PostgreSQL or Supabase.
-
-Set:
-
-```env
-DATABASE_URL=postgresql://...
-```
-
-The application detects PostgreSQL automatically.
-
-Never commit database credentials.
-
-## Job import API
-
-```http
-POST /api/jobs/import
-```
+`POST /api/discover`
 
 Example:
-
-```json
-{
-  "jobs": [{
-    "external_id": "example-123",
-    "source": "company-ats",
-    "title": "QA Automation Engineer",
-    "company": "Example Corp",
-    "location": "Bangalore",
-    "work_mode": "Hybrid",
-    "salary_min": 5,
-    "salary_max": 7,
-    "experience_min": 1,
-    "url": "https://jobs.example.com/123",
-    "description": "Playwright, Python, SQL, API testing..."
-  }]
-}
-```
-
-If salary or experience is omitted, ApplyBot attempts to extract them from the job description.
-
-## Job discovery and auto-apply
-
-ApplyBot is focused on the requested job criteria. It does not use RSS/Atom feeds and does not open LinkedIn or Google as a discovery step.
-
-### Configure your target
-
-- Desired role / keywords
-- Location
-- Remote-only preference
-- Minimum match threshold (default 70%)
-- Maximum experience requirement
-- Minimum salary threshold
-
-### One-click workflow
-
-**Find & Auto-Apply** runs:
-
-1. Fetch matching listings from configured public/authorized job APIs.
-2. Normalize the listings.
-3. Filter by role, location, experience and salary.
-4. Calculate the ApplyBot match score.
-5. Reject anything below your threshold.
-6. Generate application answers for every qualified job.
-7. Put each qualified application into the application workflow.
-
-A job below the threshold is never passed to the application workflow.
-
-### Important distinction
-
-The current backend reports `application_ready`, not `submitted`, unless a supported application adapter actually completes a permitted third-party submission.
-
-ApplyBot must not claim that an application was submitted when it only prepared the application. Third-party automatic submission requires a supported, authorized application flow. Login challenges, CAPTCHA, session-cookie extraction, anti-bot bypasses and stealth techniques are not used.
-
-### Discovery API
-
-`POST /api/discover/search`
 
 ```json
 {
   "query": "QA Automation Engineer",
   "location": "India",
   "remote": false,
-  "threshold": 70
+  "threshold": 70,
+  "max_experience": 2,
+  "min_salary": 3
 }
 ```
 
-### Automatic qualification
+The response includes:
+
+- sources checked
+- number of listings found
+- number of qualified jobs
+- provider errors
+- job IDs
+- scores
+- reasons
+- matched skills
+
+### Search only
+
+`POST /api/discover/search`
+
+### Auto apply
 
 `POST /api/jobs/{job_id}/auto-apply`
 
-The endpoint checks the stored match score against the requested threshold before creating the application workflow.
+The endpoint re-checks the threshold before starting submission.
 
-## Matching rules
+### Configuration
 
-A job can be rejected because:
+`GET /api/config`
 
-- The role is outside the configured targets.
-- Required experience is above the configured limit.
-- Location is outside preferences.
-- Published salary is below ₹3 LPA.
+Shows whether automatic application, email, phone, resume and supported ATS adapters are configured.
 
-Jobs without published salary are not automatically rejected; they are marked as requiring compensation verification.
+### Resume upload
 
-The match score combines:
+`POST /api/resume`
 
-- Role relevance
-- Experience fit
-- Location fit
-- Work-mode fit
-- Salary fit
-- Skill overlap
+Multipart field:
 
-## Application generation
+`resume=<PDF>`
 
-```http
-POST /api/jobs/{job_id}/prepare
-```
+### Jobs
 
-Creates:
+`GET /api/jobs`
 
-- Tailored professional summary
-- Cover letter
-- Reusable application answers
-- Expected compensation answer
-- Relocation answer
-- Notice-period answer
-- Automation experience answer
-- Playwright experience answer
-- Selenium answer
-- Work authorization answer
+### Applications
 
-The generated material is based on the configured candidate profile.
+`GET /api/applications`
 
-It must not be used to invent qualifications or employment history.
+### Application status
 
-## Application statuses
+`POST /api/applications/{id}/status`
+
+### Health
+
+`GET /api/health`
+
+## Application states
 
 ```
-draft
+application_ready
 approved
+requires_configuration
+requires_user_action
+failed
 applied
 rejected
 interview
@@ -329,106 +252,19 @@ offer
 closed
 ```
 
-API:
+**Applied** is only recorded when the browser submission step completes. A prepared application is never falsely reported as submitted.
 
-```http
-GET  /api/applications
-POST /api/applications/{id}/status
-```
+## Database
 
-## Health check
+SQLite is used locally.
 
-```http
-GET /api/health
-```
-
-Example:
-
-```json
-{
-  "status": "ok",
-  "service": "ApplyBot",
-  "database": "postgres"
-}
-```
-
-## Render deployment
-
-Create a Render Web Service connected to:
-
-```
-SanFlash/ApplyBot
-```
-
-Build command:
-
-```bash
-pip install -r requirements.txt
-```
-
-Start command:
-
-```bash
-gunicorn -b 0.0.0.0:$PORT app:app
-```
-
-Set:
+Production uses PostgreSQL/Supabase through:
 
 ```env
-DEBUG=false
-DATABASE_URL=<your Supabase/PostgreSQL connection string>
+DATABASE_URL=postgresql://...
 ```
 
-The repository includes `render.yaml`.
-
-### Recommended Render architecture
-
-```
-Render Web Service
-        |
-        +---- Flask API
-        |
-        +---- ApplyBot dashboard
-        |
-        v
-Supabase PostgreSQL
-```
-
-Do not rely on Render's local filesystem for permanent job/application data.
-
-## Vercel
-
-The current application is Flask-first and is therefore best deployed as a Render backend.
-
-For the eventual production UI:
-
-```
-Vercel
-  |
-  +-- Next.js frontend
-          |
-          v
-      Render Flask API
-          |
-          v
-      Supabase PostgreSQL
-```
-
-A dedicated Next.js frontend can be added in the next stage without changing the backend API contract.
-
-## Docker
-
-Build:
-
-```bash
-docker build -t applybot .
-```
-
-Run:
-
-```bash
-docker run -p 8000:8000 applybot
-```
+The startup migration creates any new audit columns required by newer ApplyBot versions.
 
 ## Tests
 
@@ -436,132 +272,24 @@ docker run -p 8000:8000 applybot
 pytest -q
 ```
 
-GitHub Actions also runs tests on push and pull request.
+GitHub Actions runs the test suite on pushes and pull requests.
 
-## Production security boundary
+## Security boundary
 
-ApplyBot intentionally does **not** implement:
+ApplyBot does not implement:
 
-- LinkedIn password collection.
-- LinkedIn session-cookie collection.
-- CAPTCHA bypass.
-- Stealth browser fingerprinting.
-- Unauthorized LinkedIn scraping.
-- Automated activity intended to evade platform controls.
+- LinkedIn password collection
+- LinkedIn session-cookie extraction
+- CAPTCHA solving/bypass
+- stealth fingerprinting
+- anti-bot evasion
+- unauthorized scraping
+- guessed answers to required application questions
 
-Use authorized APIs, public/authorized feeds, company ATS integrations, or user-initiated workflows.
+Automatic application is limited to public, supported ATS application forms and truthful configured candidate information.
 
-Application submission remains a human-controlled step.
+## Repository
 
-## Environment variables
+GitHub:
 
-```env
-PORT=8000
-DEBUG=false
-DATABASE_URL=
-```
-
-Do not commit:
-
-- `.env`
-- passwords
-- API keys
-- database credentials
-- browser session cookies
-- private tokens
-
-## Recommended real-world workflow
-
-For your current job search, use this sequence:
-
-```
-1. Enter role + location
-        ↓
-2. In-app job search
-        ↓
-3. Open a suitable job
-        ↓
-4. Paste job details into ApplyBot
-        ↓
-5. ApplyBot scores the job
-        ↓
-6. Prepare application
-        ↓
-7. Review summary / cover letter / answers
-        ↓
-8. Open the original job URL
-        ↓
-9. Submit manually
-        ↓
-10. Track application status in ApplyBot
-```
-
-This gives you the repetitive analysis and application-preparation benefits without making the system dependent on unauthorized LinkedIn automation.
-
-## API summary
-
-| Endpoint | Purpose |
-|---|---|
-| `GET /api/search-links` | Generate user-initiated job search links |
-| `POST /api/jobs/manual` | Analyze and store a job selected by the user |
-| `POST /api/jobs/import` | Import structured jobs |
-| `GET /api/jobs` | List scored jobs |
-| `POST /api/jobs/{id}/prepare` | Generate application draft |
-| `GET /api/applications` | Track applications |
-| `POST /api/applications/{id}/status` | Update application status |
-| `POST /api/feeds` | Add authorized RSS/Atom feed |
-| `POST /api/discover` | Discover jobs from feeds |
-| `GET /api/health` | Health/database status |
-
-## Roadmap
-
-### Stage 1 — Foundation
-- Candidate profile
-- Job matching
-- Application drafts
-- Dashboard
-- Tracking
-- CI/CD
-
-### Stage 2 — Current
-- PostgreSQL/Supabase support
-- RSS/Atom discovery
-- Feed registry
-- Duplicate handling
-- Extraction
-- Production database boundary
-
-### Stage 3 — Next
-- Scheduled discovery worker for permitted feeds
-- More authorized job-source connectors
-- Browser-assisted handoff workflows that keep final submission human-controlled
-- Better semantic job matching
-- AI-powered JD analysis
-- Resume tailoring
-- Duplicate-company/application intelligence
-- Notifications
-
-### Stage 4
-- Next.js/Vercel dashboard
-- Authentication
-- User-configurable search profiles
-- Application analytics
-- Interview tracking
-- Recruiter follow-up management
-
-### Stage 5
-- Production background workers
-- Queue management
-- Observability
-- Multi-user architecture
-- Approved ATS application workflows
-
-## Author
-
-Satyendra Kumar Namdeo
-
-QA Engineer | QA Automation | SDET | AI-Assisted QA
-
-GitHub: https://github.com/SanFlash
-
-LinkedIn: https://www.linkedin.com/in/satyendra-namdeo/
+https://github.com/SanFlash/ApplyBot
