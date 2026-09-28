@@ -1,6 +1,6 @@
 # ApplyBot
 
-ApplyBot is an in-app job discovery, matching, application generation and supported-ATS auto-application system.
+ApplyBot is an in-app job discovery, matching, application generation and supported-ATS auto-application system. LinkedIn Jobs is the primary discovery source through a managed third-party data API; ApplyBot never asks for a LinkedIn password or session cookie.
 
 The workflow is:
 
@@ -45,19 +45,32 @@ For every discovered job the dashboard shows:
 - Detected application adapter
 - Final application status
 
-Current discovery sources:
+Primary discovery source:
 
-- **Adzuna** — broad live job-ad search for India; requires an `ADZUNA_APP_ID` and `ADZUNA_APP_KEY`.
-- **Greenhouse** — direct employer ATS postings when company board tokens are configured in `GREENHOUSE_BOARDS`.
-- **Lever** — direct employer ATS postings when company slugs are configured in `LEVER_COMPANIES`.
-- **Arbeitnow** — public normalized job-board data.
-- **Remotive** — discovery-only remote jobs; its public API terms prohibit submitting its listings to third-party sites.
+- **LinkedIn Jobs via Bright Data Jobs Data API** — ApplyBot sends the desired keywords and location to the managed API and receives structured LinkedIn job records. Bright Data documents LinkedIn Jobs retrieval with job-title/location filtering and structured job information. urlBright Data Jobs Data APIhttps://brightdata.com/products/data-feeds/jobs-data-api
+- Legacy sources (Adzuna, Greenhouse, Lever, Remotive and Arbeitnow) are **disabled by default** so broad unrelated listings do not pollute a LinkedIn-focused search. They can be explicitly enabled with `ENABLE_LEGACY_SOURCES=true`.
 
-For a genuinely broad, current search, configure Adzuna. The Adzuna API provides job-ad search by keywords and location and requires an app ID/key. urlAdzuna API documentationhttps://developer.adzuna.com/overview
+`BRIGHTDATA_API_KEY` is required for live LinkedIn discovery. The default dataset ID is `gd_m487ihp32jtc4ujg45`; it can be overridden with `BRIGHTDATA_LINKEDIN_DATASET_ID`.
 
-Lever's public postings API exposes published postings, including application URLs, while its authenticated API is separate. urlLever developer documentationhttps://hire.lever.co/developer/documentation
+Discovery flow:
 
-There is no RSS/Atom workflow in the current discovery path and ApplyBot does not open LinkedIn or Google as a discovery step.
+```text
+User query + location
+       ↓
+Bright Data LinkedIn Jobs API
+       ↓
+Normalize LinkedIn records
+       ↓
+Location / remote filtering
+       ↓
+ApplyBot role + skill + experience + salary scoring
+       ↓
+Threshold-qualified queue
+       ↓
+Supported ATS application
+```
+
+ApplyBot does **not** claim to call a public official LinkedIn Job Search API. A managed data provider is used as the LinkedIn data layer instead. Bright Data currently documents LinkedIn Jobs retrieval through its Jobs Data API. citeturn0search0turn0search15
 
 ## Matching
 
