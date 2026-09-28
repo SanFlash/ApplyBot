@@ -911,7 +911,7 @@ def jobs():
     if ENABLE_LEGACY_SOURCES:
         rows = c.execute("SELECT * FROM jobs ORDER BY match_score DESC, discovered_at DESC").fetchall()
     else:
-        rows = c.execute("SELECT * FROM jobs WHERE source=? ORDER BY match_score DESC, discovered_at DESC", ("Jobicy",)).fetchall()
+        rows = c.execute("SELECT * FROM jobs WHERE source=? OR source LIKE 'user-assisted%' ORDER BY match_score DESC, discovered_at DESC", ("Jobicy",)).fetchall()
     c.close()
     return jsonify([dict(r) for r in rows])
 
