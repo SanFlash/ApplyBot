@@ -96,7 +96,7 @@ The adapter:
 8. Submits through the public application form when an unambiguous submit control exists.
 9. Records the outcome.
 
-It never attempts to bypass CAPTCHA, authentication, anti-bot challenges or session controls.
+It never attempts to bypass CAPTCHA, authentication, anti-bot challenges or session controls. Remotive API listings are displayed for discovery only; ApplyBot does not auto-submit those listings because Remotive's public API terms prohibit third-party submission.
 
 ### Important configuration
 
@@ -244,6 +244,7 @@ application_ready
 approved
 requires_configuration
 requires_user_action
+unsupported_source_policy
 failed
 applied
 rejected
