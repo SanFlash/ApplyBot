@@ -134,7 +134,7 @@ def test_discover_search_uses_server_side_sources(tmp_path, monkeypatch):
             "salary_max": None,
             "url": "https://remotive.com/remote-jobs/example/qa-automation-engineer-999",
             "description": "Playwright Python API testing, 1 year experience, 4-6 LPA",
-        }], [])
+        }], [], [{"source": "Remotive", "found": 1, "configured": True}])
 
     monkeypatch.setattr(applybot, "search_public_sources", fake_search)
     r = client.post("/api/discover/search", json={"query": "QA Automation Engineer", "location": "India", "remote": True})
