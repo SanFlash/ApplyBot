@@ -22,6 +22,10 @@ AUTO_APPLY_MAX = max(1, int(os.getenv("AUTO_APPLY_MAX", "3")))
 CANDIDATE_EMAIL = os.getenv("CANDIDATE_EMAIL", "").strip()
 CANDIDATE_PHONE = os.getenv("CANDIDATE_PHONE", "").strip()
 RESUME_PATH = os.getenv("RESUME_PATH", "").strip()
+ADZUNA_APP_ID = os.getenv("ADZUNA_APP_ID", "").strip()
+ADZUNA_APP_KEY = os.getenv("ADZUNA_APP_KEY", "").strip()
+GREENHOUSE_BOARDS = [x.strip() for x in os.getenv("GREENHOUSE_BOARDS", "").split(",") if x.strip()]
+LEVER_COMPANIES = [x.strip() for x in os.getenv("LEVER_COMPANIES", "").split(",") if x.strip()]
 
 def resume_file_path():
     configured = RESUME_PATH or str(DATA / "resume.pdf")
@@ -380,6 +384,77 @@ def normalize_remotive_jobs(data):
     return jobs
 
 
+def normalize_adzuna_jobs(data):
+    jobs = []
+    for raw in data.get("results", []):
+        description = strip_html(raw.get("description", ""))
+        salary = raw.get("salary_is_predicted")
+        smin = raw.get("salary_min")
+        smax = raw.get("salary_max")
+        # Adzuna's country endpoint returns local-currency salary values.
+        if smin is not None:
+            smin = float(smin) / 100000
+        if smax is not None:
+            smax = float(smax) / 100000
+        jobs.append({
+            "external_id": "adzuna:" + str(raw.get("id", "")),
+            "source": "Adzuna",
+            "title": (raw.get("title") or "").strip(),
+            "company": (raw.get("company", {}).get("display_name") if isinstance(raw.get("company"), dict) else raw.get("company") or "Unknown").strip(),
+            "location": (raw.get("location", {}).get("display_name") if isinstance(raw.get("location"), dict) else raw.get("location") or "").strip(),
+            "work_mode": "Remote" if "remote" in (description + " " + str(raw.get("title", ""))).lower() else "",
+            "salary_min": smin,
+            "salary_max": smax,
+            "url": raw.get("redirect_url") or raw.get("url", ""),
+            "description": description,
+            "salary_predicted": bool(salary),
+        })
+    return jobs
+
+
+def normalize_greenhouse_jobs(data, board):
+    jobs = []
+    for raw in data.get("jobs", []):
+        description = strip_html(raw.get("content", ""))
+        location = ((raw.get("location") or {}).get("name") if isinstance(raw.get("location"), dict) else raw.get("location") or "")
+        jobs.append({
+            "external_id": "greenhouse:" + board + ":" + str(raw.get("id", "")),
+            "source": "Greenhouse:" + board,
+            "title": (raw.get("title") or "").strip(),
+            "company": board,
+            "location": str(location).strip(),
+            "work_mode": "Remote" if "remote" in (str(location) + " " + description).lower() else "",
+            "salary_min": None,
+            "salary_max": None,
+            "url": raw.get("absolute_url") or "",
+            "description": description,
+        })
+    return jobs
+
+
+def normalize_lever_jobs(data, company):
+    jobs = []
+    rows = data if isinstance(data, list) else data.get("data", [])
+    for raw in rows:
+        categories = raw.get("categories") or {}
+        location = categories.get("location") or raw.get("location") or ""
+        description = strip_html((raw.get("descriptionPlain") or raw.get("description") or raw.get("content") or ""))
+        urls = raw.get("urls") or {}
+        jobs.append({
+            "external_id": "lever:" + company + ":" + str(raw.get("id", "")),
+            "source": "Lever:" + company,
+            "title": (raw.get("text") or raw.get("position") or raw.get("title") or "").strip(),
+            "company": company,
+            "location": str(location).strip(),
+            "work_mode": str(raw.get("workplaceType") or ("Remote" if "remote" in (str(location) + " " + description).lower() else "")),
+            "salary_min": None,
+            "salary_max": None,
+            "url": urls.get("apply") or urls.get("show") or raw.get("hostedUrl") or raw.get("url") or "",
+            "description": description,
+        })
+    return jobs
+
+
 def normalize_arbeitnow_jobs(data):
     jobs = []
     for raw in data.get("data", []):
@@ -415,28 +490,68 @@ def search_public_sources(query, location="", remote=False):
     query = (query or "").strip() or "QA Automation Engineer"
     results = []
     errors = []
+    source_status = []
 
-    # Remotive is an authorized public API with keyword search. Keep requests
-    # bounded because the provider asks clients not to poll excessively.
+    if ADZUNA_APP_ID and ADZUNA_APP_KEY:
+        try:
+            data = fetch_json(
+                "https://api.adzuna.com/v1/api/jobs/in/search/1",
+                {
+                    "app_id": ADZUNA_APP_ID,
+                    "app_key": ADZUNA_APP_KEY,
+                    "results_per_page": "50",
+                    "what": query,
+                    "where": location or "India",
+                    "content-type": "application/json",
+                    "sort_by": "date",
+                },
+            )
+            rows = normalize_adzuna_jobs(data)
+            results.extend(rows)
+            source_status.append({"source": "Adzuna", "found": len(rows), "configured": True})
+        except Exception as exc:
+            errors.append({"source": "Adzuna", "error": str(exc)})
+            source_status.append({"source": "Adzuna", "found": 0, "configured": True})
+    else:
+        source_status.append({"source": "Adzuna", "found": 0, "configured": False})
+
+    for board in GREENHOUSE_BOARDS:
+        try:
+            data = fetch_json(f"https://boards-api.greenhouse.io/v1/boards/{board}/jobs", {"content": "true"})
+            rows = normalize_greenhouse_jobs(data, board)
+            results.extend(rows)
+            source_status.append({"source": "Greenhouse:" + board, "found": len(rows), "configured": True})
+        except Exception as exc:
+            errors.append({"source": "Greenhouse:" + board, "error": str(exc)})
+
+    for company in LEVER_COMPANIES:
+        try:
+            data = fetch_json(f"https://api.lever.co/v0/postings/{company}", {"mode": "json"})
+            rows = normalize_lever_jobs(data, company)
+            results.extend(rows)
+            source_status.append({"source": "Lever:" + company, "found": len(rows), "configured": True})
+        except Exception as exc:
+            errors.append({"source": "Lever:" + company, "error": str(exc)})
+
+    # Remotive is retained only as a discovery source because its public API
+    # terms prohibit submitting its listings to third-party sites.
     try:
-        data = fetch_json(
-            "https://remotive.com/api/remote-jobs",
-            {"search": query, "limit": "50"},
-        )
-        results.extend(normalize_remotive_jobs(data))
+        data = fetch_json("https://remotive.com/api/remote-jobs", {"search": query, "limit": "50"})
+        rows = normalize_remotive_jobs(data)
+        results.extend(rows)
+        source_status.append({"source": "Remotive", "found": len(rows), "configured": True})
     except Exception as exc:
         errors.append({"source": "Remotive", "error": str(exc)})
 
-    # Arbeitnow is a public job-board API. Its free API returns a normalized
-    # collection from multiple ATS sources; ApplyBot filters locally.
     try:
         data = fetch_json("https://www.arbeitnow.com/api/job-board-api")
         arbeit = normalize_arbeitnow_jobs(data)
-        q_tokens = [x for x in re.findall(r"[a-zA-Z0-9+#.-]+", query.lower()) if x not in STOPWORDS]
+        q_tokens = tokens(query)
         for job in arbeit:
-            haystack = (job["title"] + " " + job["description"]).lower()
-            if not q_tokens or any(token in haystack for token in q_tokens):
+            haystack = ((job["title"] + " " + job["description"]).lower())
+            if not q_tokens or sum(1 for token in q_tokens if token in haystack) >= max(1, min(3, len(q_tokens))):
                 results.append(job)
+        source_status.append({"source": "Arbeitnow", "found": len(arbeit), "configured": True})
     except Exception as exc:
         errors.append({"source": "Arbeitnow", "error": str(exc)})
 
@@ -452,8 +567,8 @@ def search_public_sources(query, location="", remote=False):
             continue
         seen.add(key)
         filtered.append(job)
-    return filtered, errors
 
+    return filtered, errors, source_status
 
 def import_job_items(items):
     c = db()
@@ -524,7 +639,7 @@ def run_discovery(body):
     threshold = float(body.get("threshold", 70))
     max_experience = float(body.get("max_experience", 2))
     min_salary = max(float(body.get("min_salary", 3)), CANDIDATE["minimum_ctc_lpa"])
-    items, errors = search_public_sources(query, location, remote)
+    items, errors, source_status = search_public_sources(query, location, remote)
     results = import_job_items(items)
 
     c = db()
@@ -545,7 +660,7 @@ def run_discovery(body):
         "threshold": threshold,
         "max_experience": max_experience,
         "min_salary": min_salary,
-        "sources_checked": ["Remotive", "Arbeitnow"],
+        "sources_checked": source_status,
         "items_seen": len(items),
         "new_jobs": len(results),
         "qualified_jobs": len(qualified),
