@@ -247,10 +247,11 @@ def test_normalize_linkedin_job():
     assert jobs[0]["salary_min"] == 4
     assert jobs[0]["salary_max"] == 6
     assert jobs[0]["experience_min"] == 1
+    assert jobs[0]["source_url"].startswith("https://www.linkedin.com/")
 
 
 def test_linkedin_provider_requires_configuration(monkeypatch):
-    monkeypatch.setattr(applybot, "BRIGHTDATA_API_KEY", "")
+    monkeypatch.setattr(applybot, "APIFY_API_TOKEN", "")
     jobs, errors, status = applybot.search_linkedin_jobs("QA Automation Engineer", "India")
     assert jobs == []
     assert errors and "not configured" in errors[0]["error"]
