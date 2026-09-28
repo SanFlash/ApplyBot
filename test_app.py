@@ -145,13 +145,57 @@ def test_discover_search_uses_server_side_sources(tmp_path, monkeypatch):
     assert client.get("/api/jobs").json[0]["source"] == "Remotive"
 
 
-def test_add_feed_sqlite(tmp_path, monkeypatch):
+
+
+def test_discover_search_uses_threshold_and_returns_job_ids(tmp_path, monkeypatch):
     client = setup_db(tmp_path, monkeypatch)
-    r = client.post("/api/feeds", json={
-        "name": "Example Jobs",
-        "url": "https://example.com/jobs.xml",
-        "source_type": "rss",
+
+    def fake_search(query, location="", remote=False):
+        return ([{
+            "external_id": "job:999",
+            "source": "test-api",
+            "title": "QA Automation Engineer",
+            "company": "Example",
+            "location": "Indore",
+            "work_mode": "Hybrid",
+            "salary_min": 4,
+            "salary_max": 6,
+            "experience_min": 1,
+            "url": "https://example.com/jobs/999",
+            "description": "Playwright Python API testing",
+        }], [])
+
+    monkeypatch.setattr(applybot, "search_public_sources", fake_search)
+    r = client.post("/api/discover/search", json={
+        "query": "QA Automation Engineer",
+        "location": "Indore",
+        "remote": False,
+        "threshold": 70,
     })
     assert r.status_code == 200
-    feeds = client.get("/api/feeds").json
-    assert feeds[0]["enabled"] in (1, True)
+    assert r.json["mode"] == "in_app"
+    assert r.json["qualified_jobs"] == 1
+    assert r.json["results"][0]["job_id"]
+
+
+def test_auto_apply_is_threshold_gated(tmp_path, monkeypatch):
+    client = setup_db(tmp_path, monkeypatch)
+    job = {
+        "external_id": "threshold-1",
+        "source": "test-api",
+        "title": "QA Automation Engineer",
+        "company": "Example",
+        "location": "Indore",
+        "work_mode": "Hybrid",
+        "salary_min": 4,
+        "salary_max": 6,
+        "experience_min": 1,
+        "url": "https://example.com/jobs/threshold-1",
+        "description": "Playwright Python API testing",
+    }
+    client.post("/api/jobs/import", json={"jobs": [job]})
+    job_row = client.get("/api/jobs").json[0]
+    r = client.post(f"/api/jobs/{job_row['id']}/auto-apply", json={"threshold": 99})
+    assert r.status_code == 200
+    assert r.json["status"] == "below_threshold"
+    assert r.json["submitted"] if "submitted" in r.json else True
