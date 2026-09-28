@@ -126,7 +126,7 @@ def init_db():
               key TEXT PRIMARY KEY, value TEXT NOT NULL)""",
             """CREATE TABLE IF NOT EXISTS feed_sources (
               id BIGSERIAL PRIMARY KEY, name TEXT NOT NULL, url TEXT UNIQUE NOT NULL,
-              source_type TEXT NOT NULL DEFAULT 'rss', enabled INTEGER NOT NULL DEFAULT 1,
+              source_type TEXT NOT NULL DEFAULT 'rss', enabled BOOLEAN NOT NULL DEFAULT TRUE,
               created_at TEXT NOT NULL)""",
         ]
     else:
@@ -151,6 +151,21 @@ def init_db():
 
     for statement in statements:
         c.execute(statement)
+
+    # Older ApplyBot versions created PostgreSQL feed_sources.enabled as INTEGER.
+    # Normalize that column once so both fresh and existing Supabase databases use BOOLEAN.
+    if c.pg:
+        column = c.execute(
+            "SELECT data_type FROM information_schema.columns "
+            "WHERE table_name='feed_sources' AND column_name='enabled'"
+        ).fetchone()
+        if column and str(column["data_type"]).lower() != "boolean":
+            c.execute("ALTER TABLE feed_sources ALTER COLUMN enabled DROP DEFAULT")
+            c.execute(
+                "ALTER TABLE feed_sources ALTER COLUMN enabled TYPE BOOLEAN "
+                "USING (enabled::text IN ('1','true','t'))"
+            )
+            c.execute("ALTER TABLE feed_sources ALTER COLUMN enabled SET DEFAULT TRUE")
 
     candidate_json = json.dumps(CANDIDATE)
     if c.pg:
