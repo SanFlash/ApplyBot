@@ -83,8 +83,28 @@ textarea{min-height:130px;resize:vertical}.searchbox{margin-top:16px;padding:16p
 <div class="hint">Paste details from a job you are authorized to view, including a LinkedIn job. ApplyBot will score it and prepare the application. Discovery itself no longer requires opening LinkedIn, Google, or another hiring-site search page.</div>
 </section>
 <section class="card" style="margin-top:20px">
-<div style="display:flex;justify-content:space-between;align-items:center"><div><h2 style="margin:0 0 5px">Application Queue</h2><div class="muted">Imported jobs are evaluated against your profile and rules.</div></div></div>
-<div id="jobs" class="jobs"></div>
+<div style="display:flex;justify-content:space-between;gap:12px;align-items:center;flex-wrap:wrap">
+<div><h2 style="margin:0 0 5px">Auto Job Apply</h2><div class="muted">Find matching jobs inside ApplyBot, enforce your threshold, and automatically prepare qualified applications.</div></div>
+<div style="display:flex;gap:8px"><button onclick="discover()">Find & Auto-Apply</button><button class="secondary" onclick="load()">Refresh</button></div>
+</div>
+<div class="searchbox">
+<div class="searchrow">
+<input id="searchQuery" value="QA Automation Engineer" placeholder="Desired job / keywords">
+<input id="searchLocation" value="India" placeholder="Location">
+<label class="check"><input id="searchRemote" type="checkbox"> Remote only</label>
+</div>
+<div class="searchrow" style="margin-top:8px">
+<label><span class="hint">Minimum match %</span><input id="threshold" type="number" min="1" max="100" value="70"></label>
+<label><span class="hint">Maximum experience (years)</span><input id="maxExperience" type="number" min="0" step="0.5" value="2"></label>
+<label><span class="hint">Minimum salary (LPA)</span><input id="minSalary" type="number" min="0" step="0.5" value="3"></label>
+</div>
+<div class="searchactions"><button onclick="searchInApp()">Search & score only</button><button class="secondary" onclick="discover()">Search + auto-apply qualified jobs</button></div>
+<div class="hint">The application uses public/authorized job-source APIs. It does not use passwords, session cookies, CAPTCHA bypasses, or stealth automation. Only jobs meeting your threshold are sent into the application workflow.</div>
+</div>
+<div id="feedStatus" class="muted" style="margin-top:10px"></div>
+<div class="divider"></div>
+<div class="subhead">Application profile</div>
+<div class="hint">ApplyBot uses your configured candidate profile and generates answers without inventing qualifications. Automatic submission to a third-party site requires that site's permitted application flow; CAPTCHA/login challenges are never bypassed.</div>
 </section>
 </main>
 <div id="modal" class="modal"><div class="modalbox">
@@ -99,30 +119,39 @@ async function load(){
  const [jr,ar]=await Promise.all([fetch('/api/jobs').then(r=>r.json()),fetch('/api/applications').then(r=>r.json())]);
  document.querySelector('#k1').textContent=jr.length;document.querySelector('#k2').textContent=jr.filter(x=>x.status==='ready'||x.status==='application_ready').length;document.querySelector('#k3').textContent=ar.length;
  const el=document.querySelector('#jobs');
- if(!jr.length){el.innerHTML='<div class="empty">No jobs yet. Use “Search inside ApplyBot” or “Discover & score jobs”. Results are fetched and evaluated inside the application.</div>';return}
- el.innerHTML=jr.map(j=>`<div class="card job"><div><b>${esc(j.title)}</b><div class="muted">${esc(j.company)} · ${esc(j.location||'Location undisclosed')}</div></div><div><span class="pill">${esc(j.status)}</span></div><div class="score">${Math.round(j.match_score)}%</div><div>${j.salary_min||j.salary_max?'₹'+(j.salary_min||'')+'–'+(j.salary_max||'')+' LPA':'Salary TBD'}</div><button onclick="prepare(${j.id})">Prepare application</button></div>`).join('')
+ if(!jr.length){el.innerHTML='<div class="empty">No jobs yet. Enter your desired role, location and threshold, then search.</div>';return}
+ el.innerHTML=jr.map(j=>`<div class="card job"><div><b>${esc(j.title)}</b><div class="muted">${esc(j.company)} · ${esc(j.location||'Location undisclosed')}</div></div><div><span class="pill">${esc(j.status)}</span></div><div class="score">${Math.round(j.match_score)}%</div><div>${j.salary_min||j.salary_max?'₹'+(j.salary_min||'')+'–'+(j.salary_max||'')+' LPA':'Salary TBD'}</div><button onclick="applyJob(${j.id})">Auto-apply</button></div>`).join('')
 }
 async function searchInApp(){
  const query=document.querySelector('#searchQuery').value.trim()||'QA Automation Engineer';
  const location=document.querySelector('#searchLocation').value.trim()||'India';
  const remote=document.querySelector('#searchRemote').checked;
- document.querySelector('#feedStatus').textContent='Searching authorized sources inside ApplyBot...';
- const r=await fetch('/api/discover/search',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({query,location,remote})});
+ const threshold=Number(document.querySelector('#threshold').value)||70;
+ document.querySelector('#feedStatus').textContent='Searching and scoring jobs...';
+ const r=await fetch('/api/discover/search',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({query,location,remote,threshold})});
  const x=await r.json();
- document.querySelector('#feedStatus').textContent=x.error||`Searched ${x.sources_checked?.join(', ')||'sources'} · found ${x.items_seen||0} matching items · added ${x.new_jobs||0} new jobs`+(x.errors?.length?' · Some sources returned errors.':'');
+ document.querySelector('#feedStatus').textContent=x.error||`Found ${x.items_seen||0} jobs · ${x.qualified_jobs||0} qualified at ${threshold}%+`;
  load();
 }
-async function importManual(){const body={title:document.querySelector('#manualTitle').value.trim(),company:document.querySelector('#manualCompany').value.trim(),location:document.querySelector('#manualLocation').value.trim(),work_mode:document.querySelector('#manualWorkMode').value.trim(),url:document.querySelector('#manualUrl').value.trim(),description:document.querySelector('#manualDescription').value.trim(),source:'user-assisted'};if(!body.title||!body.company||!body.url||!body.description)return alert('Enter title, company, job URL and job description.');const r=await fetch('/api/jobs/manual',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});const x=await r.json();document.querySelector('#feedStatus').textContent=x.error||('Job analyzed. '+x.imported+' new job added.');load()}
-
-async function addFeed(){const name=document.querySelector('#feedName').value.trim(),url=document.querySelector('#feedUrl').value.trim();if(!name||!url){return alert('Enter a feed name and URL.')}const r=await fetch('/api/feeds',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name,url,source_type:'rss'})});const x=await r.json();document.querySelector('#feedStatus').textContent=x.ok?'Feed added. Click Discover jobs.':(x.error||'Could not add feed.')}
 async function discover(){
  const query=document.querySelector('#searchQuery').value.trim()||'QA Automation Engineer';
  const location=document.querySelector('#searchLocation').value.trim()||'India';
  const remote=document.querySelector('#searchRemote').checked;
- document.querySelector('#feedStatus').textContent='Running in-app discovery across APIs and configured feeds...';
- const r=await fetch('/api/discover',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({query,location,remote})});
+ const threshold=Number(document.querySelector('#threshold').value)||70;
+ document.querySelector('#feedStatus').textContent='Finding jobs and auto-applying qualified matches...';
+ const r=await fetch('/api/discover',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({query,location,remote,threshold})});
  const x=await r.json();
- document.querySelector('#feedStatus').textContent=x.error||`Checked ${(x.api_sources_checked||[]).join(', ')} + ${x.feeds_checked||0} feeds · saw ${x.items_seen||0} items · added ${x.new_jobs||0} new jobs`+(x.errors?.length?' · Some sources returned errors.':'');
+ const qualified=(x.results||[]).filter(j=>j.score>=threshold);
+ let applied=0;
+ for(const j of qualified){ const ar=await fetch('/api/jobs/'+j.job_id+'/auto-apply',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({threshold})}); if(ar.ok) applied++; }
+ document.querySelector('#feedStatus').textContent=x.error||`Found ${x.items_seen||0} jobs · ${qualified.length} qualified · ${applied} application workflows started`;
+ load();
+}
+async function applyJob(id){
+ const threshold=Number(document.querySelector('#threshold').value)||70;
+ const r=await fetch('/api/jobs/'+id+'/auto-apply',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({threshold})});
+ const x=await r.json();
+ document.querySelector('#feedStatus').textContent=x.error||('Application workflow: '+x.status);
  load();
 }
 async function prepare(id){const x=await fetch('/api/jobs/'+id+'/prepare',{method:'POST'}).then(r=>r.json());if(x.error)return alert(x.error);currentApp=x;document.querySelector('#mmeta').textContent='Draft ID: '+x.application_id;document.querySelector('#tab-summary').innerHTML='<div class="pre">'+esc(x.summary)+'</div>';document.querySelector('#tab-cover').innerHTML='<div class="pre">'+esc(x.cover_letter)+'</div>';document.querySelector('#tab-answers').innerHTML=Object.entries(x.answers).map(([k,v])=>'<p><b>'+esc(k.replaceAll('_',' '))+'</b></p><div class="pre">'+esc(v)+'</div>').join('');document.querySelector('#modal').classList.add('on');load()}
