@@ -300,9 +300,18 @@ def score_job(j):
 
     loc = (j.get("location") or "").lower()
     mode = (j.get("work_mode") or "").lower()
+    # A remote job marked "Anywhere"/"Worldwide" is valid for an India search:
+    # the employer is not requiring an out-of-preference physical location.
+    remote_anywhere = (
+        "remote" in mode
+        and any(term in loc for term in ("anywhere", "worldwide", "global", "remote", "apac", "asia"))
+    )
     loc_ok = (
         any(x.lower() in loc for x in CANDIDATE["locations"] if x.lower() not in {"india", "remote"})
-        or "remote" in loc or "india" in loc or not loc
+        or "remote" in loc
+        or "india" in loc
+        or not loc
+        or remote_anywhere
     )
     if not loc_ok:
         return 0, ["Location is outside preferences"], []
@@ -645,7 +654,10 @@ def search_indeed_jobs(query, location="", remote=False):
         key = job.get("external_id") or job_fingerprint(job)
         if key in seen: continue
         seen.add(key); unique.append(job)
-    configured = not bool(auth_error)
+    # A present API key means the provider is configured; authorization is a
+    # separate state. Keep configured=True so the UI does not incorrectly say
+    # "not configured" when RapidAPI itself returns HTTP 401/403.
+    configured = bool(INDEED_RAPIDAPI_KEY)
     status_message = "Indeed Jobs API via RapidAPI" if not auth_error else "Indeed RapidAPI authorization failed — check RapidAPI subscription/key/host"
     if auth_error:
         errors.append({"source":"Indeed","error":auth_error,"kind":"authorization","action":"Verify the RapidAPI subscription and X-RapidAPI-Key for this Indeed API, then update Render."})
