@@ -185,8 +185,6 @@ def _dedupe(jobs):
 
 
 def search_public_sources(query, location="", remote=False):
-    import providers_v3
-
     query = (query or "").strip() or "QA Automation Engineer"
     location = (location or "").strip() or "India"
     results, errors, status = [], [], []
@@ -226,17 +224,15 @@ def search_public_sources(query, location="", remote=False):
             "provider": "Disabled",
         })
 
-    # Keep direct ATS and public fallbacks, but never require them.
-    try:
-        extra, extra_errors, extra_status = providers_v3.search_public_sources(
-            query, location, remote
-        )
-        results.extend(extra)
-        errors.extend(extra_errors)
-        for item in extra_status:
-            if item.get("source") in {"Career Web Search", "The Muse", "RemoteOK", "Jobicy"}:
-                status.append(item)
-    except Exception as exc:
-        errors.append({"source": "Secondary discovery", "error": str(exc)[:800]})
+    # v4 is intentionally self-contained. Do not import providers_v3 here:
+    # legacy providers can have optional dependencies, slow network calls, or
+    # stale APIs and must never be able to break the free discovery path.
+    status.append({
+        "source": "Legacy Providers",
+        "found": 0,
+        "raw_found": 0,
+        "configured": False,
+        "provider": "Disabled in free-first discovery path",
+    })
 
     return _dedupe(results)[:500], errors, status
