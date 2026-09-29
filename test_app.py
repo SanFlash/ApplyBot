@@ -455,3 +455,38 @@ def test_import_job_items_batch_upsert(monkeypatch, tmp_path):
         assert row["n"] == 1
     finally:
         c.close()
+
+
+def test_discovery_qualification_does_not_open_per_job_database_connections(tmp_path, monkeypatch):
+    client = setup_db(tmp_path, monkeypatch)
+
+    jobs = []
+    for i in range(120):
+        jobs.append({
+            "external_id": f"bulk-{i}",
+            "source": "Jobicy",
+            "title": "QA Automation Engineer",
+            "company": "Example",
+            "location": "India",
+            "work_mode": "Remote",
+            "salary_min": 4,
+            "salary_max": 6,
+            "experience_min": 1,
+            "url": f"https://example.com/jobs/{i}",
+            "description": "Playwright Python API testing",
+        })
+
+    def fake_search(query, location="", remote=False):
+        return (jobs, [], [{"source": "Jobicy", "found": len(jobs), "configured": True}])
+
+    monkeypatch.setattr(applybot, "search_public_sources", fake_search)
+    r = client.post("/api/discover", json={
+        "query": "QA Automation Engineer",
+        "location": "India",
+        "threshold": 50,
+        "max_experience": 2,
+        "min_salary": 3,
+    })
+    assert r.status_code == 200
+    assert r.json["items_seen"] == 120
+    assert r.json["qualified_jobs"] == 120
