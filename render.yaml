@@ -2,12 +2,12 @@ services:
   - type: web
     name: applybot
     env: python
-    buildCommand: pip install --upgrade pip && pip install -r requirements.txt && playwright install chromium
+    buildCommand: pip install --upgrade pip && pip install -r requirements.txt && playwright install chromium --with-deps
     startCommand: gunicorn --bind 0.0.0.0:$PORT --workers 1 --timeout 240 app:app
     healthCheckPath: /api/health
     envVars:
       - key: PYTHON_VERSION
-        value: "3.13.3"
+        value: "3.11.9"
       - key: DEBUG
         value: "false"
       - key: DATABASE_URL
