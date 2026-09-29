@@ -20,42 +20,8 @@ services:
         sync: false
       - key: CANDIDATE_PHONE
         sync: false
-      - key: JOBVETTA_API_KEY
-        sync: false
-      - key: JOBVETTA_API_URL
-        value: "https://api.jobvetta.com/v1/jobs"
-      - key: INDIANAPI_KEY
-        sync: false
-      - key: INDIANAPI_URL
-        value: "https://jobs.indianapi.in/jobs"
-      - key: THEMUSE_API_KEY
-        sync: false
-      - key: REMOTEOK_ENABLED
-        value: "true"
-      - key: JOBICY_API_URL
-        value: "https://jobicy.com/api/v2/remote-jobs"
-      - key: JOBICY_API_KEY
-        sync: false
-      - key: JOBICY_COUNT
-        value: "200"
-      - key: JOBICY_TIMEOUT
-        value: "30"
-      - key: ENABLE_LEGACY_SOURCES
-        value: "false"
-      - key: ADZUNA_APP_ID
-        sync: false
-      - key: ADZUNA_APP_KEY
-        sync: false
-      - key: GREENHOUSE_BOARDS
-        value: ""
-      - key: LEVER_COMPANIES
-        value: ""
       - key: RESUME_PATH
         sync: false
-      - key: BRAVE_SEARCH_API_KEY
-        sync: false
-      - key: BRAVE_SEARCH_ENABLED
-        value: "false"
       - key: FREE_JOB_DATASET_ENABLED
         value: "true"
       - key: FREE_JOB_DATASET_URL
@@ -64,9 +30,3 @@ services:
         value: "30"
       - key: FREE_JOB_DATASET_CACHE_SECONDS
         value: "900"
-      - key: BRAVE_MAX_QUERIES
-        value: "5"
-      - key: ASHBY_BOARDS
-        value: ""
-      - key: SMARTRECRUITERS_COMPANIES
-        value: ""
