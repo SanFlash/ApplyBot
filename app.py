@@ -43,6 +43,7 @@ JOBICY_TIMEOUT = max(10, int(os.getenv("JOBICY_TIMEOUT", "30")))
 INDEED_RAPIDAPI_KEY = os.getenv("INDEED_RAPIDAPI_KEY", "").strip()
 INDEED_RAPIDAPI_HOST = os.getenv("INDEED_RAPIDAPI_HOST", "indeed-jobs-api.p.rapidapi.com").strip()
 INDEED_RAPIDAPI_URL = os.getenv("INDEED_RAPIDAPI_URL", "https://indeed-jobs-api.p.rapidapi.com").strip().rstrip("/")
+INDEED_RAPIDAPI_PATH = os.getenv("INDEED_RAPIDAPI_PATH", "/jobs").strip() or "/jobs"
 INDEED_RAPIDAPI_ENABLED = os.getenv("INDEED_RAPIDAPI_ENABLED", "true").lower() == "true"
 INDEED_MAX_PAGES = min(5, max(1, int(os.getenv("INDEED_MAX_PAGES", "2"))))
 INDEED_MAX_QUERIES = min(5, max(1, int(os.getenv("INDEED_MAX_QUERIES", "3"))))
@@ -424,7 +425,10 @@ def fetch_json(url, params=None, headers=None, timeout=None):
             if status not in (429, 500, 502, 503, 504) or attempt == 2:
                 break
             time.sleep(1.5 * (attempt + 1))
-    raise RuntimeError(f"GET {target} failed after 3 attempts: {last_error}")
+    status_code = getattr(last_error, "code", None)
+    attempts_made = attempt + 1
+    suffix = f" HTTP {status_code}" if status_code else ""
+    raise RuntimeError(f"GET {target} failed after {attempts_made} attempt(s){suffix}: {last_error}")
 
 
 def post_json(url, payload, headers=None, timeout=120):
@@ -589,6 +593,15 @@ def normalize_indeed_jobs(data):
     return jobs
 
 
+def _indeed_error_kind(message):
+    text = str(message or "").lower()
+    if "http error 401" in text or "http error 403" in text or "forbidden" in text or "unauthorized" in text:
+        return "authorization"
+    if "http error 429" in text or "too many requests" in text:
+        return "rate_limit"
+    return "provider_error"
+
+
 def search_indeed_jobs(query, location="", remote=False):
     if not INDEED_RAPIDAPI_ENABLED:
         return [], [], [_provider_status("Indeed", 0, False, "Indeed RapidAPI — disabled")]
@@ -600,41 +613,46 @@ def search_indeed_jobs(query, location="", remote=False):
     results, errors = [], []
     successful_requests = 0
     pages_checked = 0
+    auth_error = None
     for search_query in queries:
         for page in range(1, INDEED_MAX_PAGES + 1):
             params = {"query": search_query, "location": "Remote" if remote else (location or "India"), "country": country, "page": page, "sort": "date"}
             if remote:
                 params["remoteOnly"] = "true"
             if INDEED_DATE_POSTED:
-                try:
-                    params["datePosted"] = int(INDEED_DATE_POSTED)
-                except ValueError:
-                    pass
+                try: params["datePosted"] = int(INDEED_DATE_POSTED)
+                except ValueError: pass
             try:
-                data = fetch_json(INDEED_RAPIDAPI_URL + "/jobs", params, headers=headers, timeout=JOBICY_TIMEOUT)
-                successful_requests += 1
-                pages_checked += 1
+                data = fetch_json(INDEED_RAPIDAPI_URL + INDEED_RAPIDAPI_PATH, params, headers=headers, timeout=JOBICY_TIMEOUT)
+                successful_requests += 1; pages_checked += 1
                 rows = normalize_indeed_jobs(data)
                 for job in rows:
                     job["_query"] = search_query
-                    if location_matches(job, location, remote):
-                        results.append(job)
-                if len(rows) < 15:
-                    break
+                    if location_matches(job, location, remote): results.append(job)
+                if len(rows) < 15: break
             except Exception as exc:
-                errors.append({"source": "Indeed", "error": f"query={search_query!r}, page={page}: {str(exc)[:900]}"})
+                message = str(exc)[:900]
+                kind = _indeed_error_kind(message)
+                if kind == "authorization":
+                    auth_error = message
+                    break
+                errors.append({"source": "Indeed", "error": f"query={search_query!r}, page={page}: {message}", "kind": kind})
                 break
+        if auth_error: break
     unique, seen = [], set()
     for job in results:
         key = job.get("external_id") or job_fingerprint(job)
-        if key in seen:
-            continue
-        seen.add(key)
-        unique.append(job)
-    status = _provider_status("Indeed", len(unique), True, "Indeed Jobs API via RapidAPI", None if successful_requests else (errors[0]["error"] if errors else "No successful requests"))
-    status.update({"raw_found": len(unique), "queries": queries, "pages_checked": pages_checked, "country": country, "max_pages": INDEED_MAX_PAGES, "direct_application_urls": any(bool(j.get("application_url")) for j in unique)})
+        if key in seen: continue
+        seen.add(key); unique.append(job)
+    configured = not bool(auth_error)
+    status_message = "Indeed Jobs API via RapidAPI" if not auth_error else "Indeed RapidAPI authorization failed — check RapidAPI subscription/key/host"
+    if auth_error:
+        errors.append({"source":"Indeed","error":auth_error,"kind":"authorization","action":"Verify the RapidAPI subscription and X-RapidAPI-Key for this Indeed API, then update Render."})
+    elif errors:
+        status_message += " — partial provider errors"
+    status = _provider_status("Indeed", len(unique), configured, status_message)
+    status.update({"raw_found":len(unique),"queries":queries,"pages_checked":pages_checked,"country":country,"max_pages":INDEED_MAX_PAGES,"endpoint":INDEED_RAPIDAPI_URL + INDEED_RAPIDAPI_PATH,"direct_application_urls":any(bool(j.get("application_url")) for j in unique),"authorization_ok":not bool(auth_error)})
     return unique, errors, [status]
-
 
 def normalize_jobicy_jobs(data):
     jobs = []
@@ -1173,109 +1191,70 @@ def search_public_sources(query, location="", remote=False):
         filtered.append(job)
     return filtered, errors, source_status
 def import_job_items(items):
-    c = db()
-    created = []
+    c = db(); created = []
     try:
-        for index, j in enumerate(items):
-            if not all(j.get(k) for k in ["title", "company", "url", "description"]):
-                continue
-
+        valid = []
+        for j in items:
+            if not all(j.get(k) for k in ["title","company","url","description"]): continue
             ext = j.get("external_id") or job_fingerprint(j)
             smin, smax = j.get("salary_min"), j.get("salary_max")
-            if smin is None and smax is None:
-                smin, smax = extract_salary(j["description"])
-            exp = j.get("experience_min")
-            if exp is None:
-                exp = extract_experience(j["description"])
-
-            base = {**j, "salary_min": smin, "salary_max": smax, "experience_min": exp}
+            if smin is None and smax is None: smin, smax = extract_salary(j["description"])
+            exp = j.get("experience_min") if j.get("experience_min") is not None else extract_experience(j["description"])
+            base = {**j,"salary_min":smin,"salary_max":smax,"experience_min":exp}
             try:
                 if AI_PROVIDER != "none":
                     from ai_engine import extract_job_intelligence
-                    intel = extract_job_intelligence(base["title"], base["description"])
-                    if isinstance(intel, dict):
-                        if base.get("experience_min") is None and intel.get("experience_years") is not None:
-                            base["experience_min"] = float(intel["experience_years"])
-                        if base.get("salary_min") is None and intel.get("salary_min_lpa") is not None:
-                            base["salary_min"] = float(intel["salary_min_lpa"])
-                        if base.get("salary_max") is None and intel.get("salary_max_lpa") is not None:
-                            base["salary_max"] = float(intel["salary_max_lpa"])
-                        base["_ai_skills"] = intel.get("required_skills") or []
-            except Exception:
-                # AI enrichment is optional and must never break discovery.
-                pass
-
-            smin, smax, exp = base.get("salary_min"), base.get("salary_max"), base.get("experience_min")
-            sc, reasons, matched = score_job(base)
-            ai_skills = base.get("_ai_skills") or []
+                    intel = extract_job_intelligence(base["title"],base["description"])
+                    if isinstance(intel,dict):
+                        if base.get("experience_min") is None and intel.get("experience_years") is not None: base["experience_min"]=float(intel["experience_years"])
+                        if base.get("salary_min") is None and intel.get("salary_min_lpa") is not None: base["salary_min"]=float(intel["salary_min_lpa"])
+                        if base.get("salary_max") is None and intel.get("salary_max_lpa") is not None: base["salary_max"]=float(intel["salary_max_lpa"])
+                        base["_ai_skills"]=intel.get("required_skills") or []
+            except Exception: pass
+            sc,reasons,matched=score_job(base)
+            ai_skills=base.get("_ai_skills") or []
             if ai_skills:
-                matched = list(dict.fromkeys(matched + [str(x) for x in ai_skills if str(x).strip()]))
-                reasons.append("AI extracted required skills")
+                matched=list(dict.fromkeys(matched+[str(x) for x in ai_skills if str(x).strip()])); reasons.append("AI extracted required skills")
+            valid.append((base,sc,reasons,matched))
 
-            status = "ready" if sc > 0 else "skipped"
+        ext_ids=[x[0].get("external_id") or job_fingerprint(x[0]) for x in valid]
+        existing_by_ext={}
+        if ext_ids:
+            if c.pg:
+                rows=c.execute("SELECT id,external_id FROM jobs WHERE external_id = ANY(?)",(ext_ids,)).fetchall()
+            else:
+                placeholders=",".join("?" for _ in ext_ids)
+                rows=c.execute(f"SELECT id,external_id FROM jobs WHERE external_id IN ({placeholders})",tuple(ext_ids)).fetchall()
+            existing_by_ext={r["external_id"]:r["id"] for r in rows}
 
-            # Check first instead of intentionally violating the UNIQUE constraint.
-            # This avoids PostgreSQL's "current transaction is aborted" state.
-            existing = c.execute("SELECT id FROM jobs WHERE external_id=?", (ext,)).fetchone()
-            if existing:
-                job_id = existing["id"]
-                c.execute(
-                    """UPDATE jobs SET source=?,title=?,company=?,location=?,work_mode=?,
-                    salary_min=?,salary_max=?,experience_min=?,source_url=?,url=?,description=?,
-                    discovered_at=?,match_score=?,status=?,skip_reason=?,match_reasons=?,matched_skills=?
-                    WHERE id=?""",
-                    (j.get("source", "manual"), j["title"], j["company"], j.get("location", ""),
-                     j.get("work_mode", ""), smin, smax, exp, j.get("source_url", j["url"]),
-                     j["url"], j["description"], utcnow(), sc, status, "; ".join(reasons),
-                     json.dumps(reasons), json.dumps(matched), job_id),
-                )
-                created.append({
-                    "job_id": job_id, "external_id": ext, "score": sc, "status": status,
-                    "matched_skills": matched, "reasons": reasons, "duplicate": True
-                })
-                continue
-
-            # Isolate each insert with a savepoint so one bad provider row cannot
-            # poison the whole PostgreSQL transaction.
-            savepoint = f"job_import_{index}"
-            try:
-                c.execute(f"SAVEPOINT {savepoint}")
-                c.execute(
-                    """INSERT INTO jobs(external_id,source,title,company,location,work_mode,salary_min,salary_max,
-                    experience_min,source_url,url,description,discovered_at,match_score,status,skip_reason,match_reasons,matched_skills)
-                    VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
-                    (ext, j.get("source", "manual"), j["title"], j["company"], j.get("location", ""),
-                     j.get("work_mode", ""), smin, smax, exp, j.get("source_url", j["url"]), j["url"],
-                     j["description"], utcnow(), sc, status, "; ".join(reasons), json.dumps(reasons), json.dumps(matched)),
-                )
-                inserted = c.execute("SELECT id FROM jobs WHERE external_id=?", (ext,)).fetchone()
-                c.execute(f"RELEASE SAVEPOINT {savepoint}")
-                created.append({
-                    "job_id": inserted["id"] if inserted else None, "external_id": ext, "score": sc,
-                    "status": status, "matched_skills": matched, "reasons": reasons
-                })
-            except Exception as exc:
-                c.execute(f"ROLLBACK TO SAVEPOINT {savepoint}")
-                c.execute(f"RELEASE SAVEPOINT {savepoint}")
-                # A concurrent insert can still win the race after our pre-check.
-                if "unique" in str(exc).lower() or "duplicate" in str(exc).lower():
-                    existing = c.execute("SELECT id FROM jobs WHERE external_id=?", (ext,)).fetchone()
-                    if existing:
-                        created.append({
-                            "job_id": existing["id"], "external_id": ext, "score": sc,
-                            "status": status, "matched_skills": matched, "reasons": reasons,
-                            "duplicate": True
-                        })
-                        continue
-                raise
-
-        c.commit()
-        return created
+        for index,(j,sc,reasons,matched) in enumerate(valid):
+            ext=j.get("external_id") or job_fingerprint(j); smin,smax,exp=j.get("salary_min"),j.get("salary_max"),j.get("experience_min"); status="ready" if sc>0 else "skipped"
+            if ext in existing_by_ext:
+                job_id=existing_by_ext[ext]
+                c.execute("UPDATE jobs SET source=?,title=?,company=?,location=?,work_mode=?,salary_min=?,salary_max=?,experience_min=?,source_url=?,url=?,description=?,discovered_at=?,match_score=?,status=?,skip_reason=?,match_reasons=?,matched_skills=? WHERE id=?",(j.get("source","manual"),j["title"],j["company"],j.get("location",""),j.get("work_mode",""),smin,smax,exp,j.get("source_url",j["url"]),j["url"],j["description"],utcnow(),sc,status,"; ".join(reasons),"; ".join(reasons),json.dumps(matched),job_id)); duplicate=True
+            else:
+                savepoint=f"job_import_{index}
+"
+                try:
+                    savepoint=savepoint.strip(); c.execute(f"SAVEPOINT {savepoint}")
+                    params=(ext,j.get("source","manual"),j["title"],j["company"],j.get("location",""),j.get("work_mode",""),smin,smax,exp,j.get("source_url",j["url"]),j["url"],j["description"],utcnow(),sc,status,"; ".join(reasons),"; ".join(reasons),json.dumps(matched))
+                    if c.pg:
+                        inserted=c.execute("INSERT INTO jobs(external_id,source,title,company,location,work_mode,salary_min,salary_max,experience_min,source_url,url,description,discovered_at,match_score,status,skip_reason,match_reasons,matched_skills) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) RETURNING id",params).fetchone(); job_id=inserted["id"] if inserted else None
+                    else:
+                        cur=c.execute("INSERT INTO jobs(external_id,source,title,company,location,work_mode,salary_min,salary_max,experience_min,source_url,url,description,discovered_at,match_score,status,skip_reason,match_reasons,matched_skills) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",params); job_id=cur.lastrowid
+                    c.execute(f"RELEASE SAVEPOINT {savepoint}"); duplicate=False
+                except Exception as exc:
+                    c.execute(f"ROLLBACK TO SAVEPOINT {savepoint}"); c.execute(f"RELEASE SAVEPOINT {savepoint}")
+                    if "unique" in str(exc).lower() or "duplicate" in str(exc).lower():
+                        existing=c.execute("SELECT id FROM jobs WHERE external_id=?",(ext,)).fetchone()
+                        if existing: job_id=existing["id"]; duplicate=True
+                        else: raise
+                    else: raise
+            created.append({"job_id":job_id,"external_id":ext,"score":sc,"status":status,"matched_skills":matched,"reasons":reasons,"duplicate":duplicate,"experience_min":exp,"salary_min":smin,"salary_max":smax})
+        c.commit(); return created
     except Exception:
-        c.conn.rollback()
-        raise
-    finally:
-        c.close()
+        c.conn.rollback(); raise
+    finally: c.close()
 
 
 @app.get("/")
@@ -1302,52 +1281,25 @@ def search_links():
 
 
 def run_discovery(body):
-    query = str(body.get("query") or "QA Automation Engineer").strip()
-    location = str(body.get("location") or "India").strip()
-    remote = bool(body.get("remote", False))
-    threshold = float(body.get("threshold", 70))
-    max_experience = float(body.get("max_experience", 2))
-    min_salary = max(float(body.get("min_salary", 3)), CANDIDATE["minimum_ctc_lpa"])
-    items, errors, source_status = search_public_sources(query, location, remote)
-    try:
-        results = import_job_items(items)
-    except Exception as exc:
-        errors.append({"source": "database", "error": str(exc)[:1500]})
-        results = []
-
-    c = db()
-    qualified = []
+    query=str(body.get("query") or "QA Automation Engineer").strip(); location=str(body.get("location") or "India").strip(); remote=bool(body.get("remote",False)); threshold=float(body.get("threshold",70)); max_experience=float(body.get("max_experience",2)); min_salary=max(float(body.get("min_salary",3)),CANDIDATE["minimum_ctc_lpa"])
+    items,errors,source_status=search_public_sources(query,location,remote)
+    try: results=import_job_items(items)
+    except Exception as exc: errors.append({"source":"database","error":str(exc)[:1500]}); results=[]
+    qualified=[]
     for r in results:
-        row = c.execute("SELECT experience_min,salary_max FROM jobs WHERE id=?", (r.get("job_id"),)).fetchone()
-        exp_ok = not row or row["experience_min"] is None or float(row["experience_min"]) <= max_experience
-        salary_ok = not row or row["salary_max"] is None or float(row["salary_max"]) >= min_salary
-        threshold_ok = float(r.get("score") or 0) >= threshold
-        r["qualified"] = bool(threshold_ok and exp_ok and salary_ok)
-        r["qualification_reason"] = (
-            "Qualified" if r["qualified"]
-            else ("Below match threshold" if not threshold_ok
-                  else ("Experience exceeds limit" if not exp_ok else "Published salary is below minimum"))
-        )
-        if r["qualified"]:
-            qualified.append(r)
-    c.close()
-
-    return {
-        "mode": "in_app",
-        "query": query,
-        "location": location,
-        "remote": remote,
-        "threshold": threshold,
-        "max_experience": max_experience,
-        "min_salary": min_salary,
-        "sources_checked": source_status,
-        "provider_summary": {str(x.get("source")): int(x.get("found") or 0) for x in source_status},
-        "items_seen": len(items),
-        "new_jobs": len(results),
-        "qualified_jobs": len(qualified),
-        "errors": errors,
-        "results": results,
-    }
+        exp_value=r.get("experience_min"); salary_value=r.get("salary_max")
+        try:
+            c=db()
+            row=c.execute("SELECT experience_min,salary_max FROM jobs WHERE id=?",(r.get("job_id"),)).fetchone()
+            if row: exp_value,salary_value=row["experience_min"],row["salary_max"]
+            c.close()
+        except Exception as exc:
+            errors.append({"source":"database","error":"Qualification lookup failed: "+str(exc)[:1000]})
+        exp_ok=exp_value is None or float(exp_value)<=max_experience; salary_ok=salary_value is None or float(salary_value)>=min_salary; threshold_ok=float(r.get("score") or 0)>=threshold
+        r["qualified"]=bool(threshold_ok and exp_ok and salary_ok)
+        r["qualification_reason"]="Qualified" if r["qualified"] else ("Below match threshold" if not threshold_ok else ("Experience exceeds limit" if not exp_ok else "Published salary is below minimum"))
+        if r["qualified"]: qualified.append(r)
+    return {"mode":"in_app","query":query,"location":location,"remote":remote,"threshold":threshold,"max_experience":max_experience,"min_salary":min_salary,"sources_checked":source_status,"provider_summary":{str(x.get("source")):int(x.get("found") or 0) for x in source_status},"items_seen":len(items),"new_jobs":len(results),"qualified_jobs":len(qualified),"errors":errors,"results":results}
 
 
 @app.post("/api/discover/search")
@@ -1423,6 +1375,15 @@ def provider_check():
     except Exception as exc:
         result["jobicy"] = {"ok": False, "error": str(exc)[:1000]}
     try:
+        if INDEED_RAPIDAPI_ENABLED and INDEED_RAPIDAPI_KEY:
+            headers={"X-RapidAPI-Key":INDEED_RAPIDAPI_KEY,"X-RapidAPI-Host":INDEED_RAPIDAPI_HOST}
+            filters=fetch_json(INDEED_RAPIDAPI_URL+"/filters",headers=headers,timeout=JOBICY_TIMEOUT)
+            result["indeed"]={"ok":isinstance(filters,dict),"configured":True,"endpoint":INDEED_RAPIDAPI_URL+"/filters","filters_loaded":sorted(filters.keys()) if isinstance(filters,dict) else []}
+        else:
+            result["indeed"]={"ok":False,"configured":False,"error":"RapidAPI key required"}
+    except Exception as exc:
+        result["indeed"]={"ok":False,"configured":False,"endpoint":INDEED_RAPIDAPI_URL+"/filters","error":str(exc)[:1200],"action":"Verify RapidAPI subscription/key and X-RapidAPI-Host in Render."}
+    try:
         c = db()
         if c.pg:
             rows = c.execute("SELECT column_name FROM information_schema.columns WHERE table_name=%s", ("jobs",)).fetchall()
@@ -1466,7 +1427,9 @@ def config_status():
             "RemoteOK": REMOTEOK_ENABLED,
             "TheMuse": THEMUSE_ENABLED,
             "LinkedIn": False,
-            "Indeed": False,
+            "Indeed": bool(INDEED_RAPIDAPI_ENABLED and INDEED_RAPIDAPI_KEY),
+            "Indeed_provider": "Indeed Jobs API via RapidAPI" if (INDEED_RAPIDAPI_ENABLED and INDEED_RAPIDAPI_KEY) else "RapidAPI key required",
+            "Indeed_endpoint": INDEED_RAPIDAPI_URL + INDEED_RAPIDAPI_PATH,
             "legacy_sources_enabled": ENABLE_LEGACY_SOURCES,
             "Adzuna": bool(ADZUNA_APP_ID and ADZUNA_APP_KEY),
             "Greenhouse": len(GREENHOUSE_BOARDS),
