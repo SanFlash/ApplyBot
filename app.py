@@ -1239,6 +1239,11 @@ def config_status():
             "configured": bool((AI_PROVIDER == "gemini" and GEMINI_API_KEY) or AI_PROVIDER == "ollama" or AI_PROVIDER == "none"),
             "model": GEMINI_MODEL if AI_PROVIDER == "gemini" else os.getenv("OLLAMA_MODEL", "gemma3"),
         },
+        "ai": {
+            "provider": AI_PROVIDER,
+            "configured": bool((AI_PROVIDER == "gemini" and GEMINI_API_KEY) or AI_PROVIDER == "ollama" or AI_PROVIDER == "none"),
+            "model": GEMINI_MODEL if AI_PROVIDER == "gemini" else os.getenv("OLLAMA_MODEL", "gemma3"),
+        },
         "candidate_email_configured": bool(CANDIDATE_EMAIL),
         "candidate_phone_configured": bool(CANDIDATE_PHONE),
         "resume_configured": resume_file_path().is_file(),
