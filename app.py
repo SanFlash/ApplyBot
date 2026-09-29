@@ -37,7 +37,8 @@ REMOTEOK_ENABLED = os.getenv("REMOTEOK_ENABLED", "true").lower() == "true"
 JOBICY_API_URL = os.getenv("JOBICY_API_URL", "https://jobicy.com/api/v2/remote-jobs").strip()
 JOBICY_API_KEY = os.getenv("JOBICY_API_KEY", "").strip()
 JOBICY_COUNT = min(200, max(1, int(os.getenv("JOBICY_COUNT", "200"))))
-JOBICY_TIMEOUT = max(10, int(os.getenv("JOBICY_TIMEOUT", "30")))
+JOBICY_TIMEOUT = max(5, int(os.getenv("JOBICY_TIMEOUT", "12")))
+FETCH_RETRIES = min(3, max(1, int(os.getenv("FETCH_RETRIES", "2"))))
 
 # Indeed RapidAPI provider. Keep the key server-side; never expose it to the browser.
 INDEED_RAPIDAPI_KEY = os.getenv("INDEED_RAPIDAPI_KEY", "").strip()
@@ -45,8 +46,8 @@ INDEED_RAPIDAPI_HOST = os.getenv("INDEED_RAPIDAPI_HOST", "indeed-jobs-api.p.rapi
 INDEED_RAPIDAPI_URL = os.getenv("INDEED_RAPIDAPI_URL", "https://indeed-jobs-api.p.rapidapi.com").strip().rstrip("/")
 INDEED_RAPIDAPI_PATH = os.getenv("INDEED_RAPIDAPI_PATH", "/jobs").strip() or "/jobs"
 INDEED_RAPIDAPI_ENABLED = os.getenv("INDEED_RAPIDAPI_ENABLED", "true").lower() == "true"
-INDEED_MAX_PAGES = min(5, max(1, int(os.getenv("INDEED_MAX_PAGES", "2"))))
-INDEED_MAX_QUERIES = min(5, max(1, int(os.getenv("INDEED_MAX_QUERIES", "3"))))
+INDEED_MAX_PAGES = min(5, max(1, int(os.getenv("INDEED_MAX_PAGES", "1"))))
+INDEED_MAX_QUERIES = min(5, max(1, int(os.getenv("INDEED_MAX_QUERIES", "2"))))
 INDEED_DATE_POSTED = os.getenv("INDEED_DATE_POSTED", "").strip()
 # The provider documents salaryMin/salaryMax as USD. Leave conversion disabled by
 # default so USD values can never be mistaken for INR/LPA. Set a trusted rate in
@@ -411,7 +412,7 @@ def fetch_json(url, params=None, headers=None, timeout=None):
     if headers:
         request_headers.update(headers)
     last_error = None
-    for attempt in range(3):
+    for attempt in range(FETCH_RETRIES):
         req = urllib.request.Request(target, headers=request_headers)
         try:
             with urllib.request.urlopen(req, timeout=timeout or JOBICY_TIMEOUT) as response:
@@ -1450,12 +1451,14 @@ def provider_check():
     try:
         if INDEED_RAPIDAPI_ENABLED and INDEED_RAPIDAPI_KEY:
             headers={"X-RapidAPI-Key":INDEED_RAPIDAPI_KEY,"X-RapidAPI-Host":INDEED_RAPIDAPI_HOST}
-            filters=fetch_json(INDEED_RAPIDAPI_URL+"/filters",headers=headers,timeout=JOBICY_TIMEOUT)
-            result["indeed"]={"ok":isinstance(filters,dict),"configured":True,"endpoint":INDEED_RAPIDAPI_URL+"/filters","filters_loaded":sorted(filters.keys()) if isinstance(filters,dict) else []}
+            probe_url = INDEED_RAPIDAPI_URL + INDEED_RAPIDAPI_PATH
+            probe = fetch_json(probe_url, {"query":"QA Automation Engineer","location":"India","country":"IN","page":1}, headers=headers, timeout=JOBICY_TIMEOUT)
+            result["indeed"]={"ok":isinstance(probe,dict),"configured":True,"authorization_ok":True,"endpoint":probe_url,"jobs_returned":len(normalize_indeed_jobs(probe))}
         else:
-            result["indeed"]={"ok":False,"configured":False,"error":"RapidAPI key required"}
+            result["indeed"]={"ok":False,"configured":False,"authorization_ok":False,"error":"RapidAPI key required"}
     except Exception as exc:
-        result["indeed"]={"ok":False,"configured":False,"endpoint":INDEED_RAPIDAPI_URL+"/filters","error":str(exc)[:1200],"action":"Verify RapidAPI subscription/key and X-RapidAPI-Host in Render."}
+        message = str(exc)[:1200]
+        result["indeed"]={"ok":False,"configured":True,"authorization_ok":not ("HTTP 401" in message or "HTTP 403" in message or "Forbidden" in message),"endpoint":INDEED_RAPIDAPI_URL + INDEED_RAPIDAPI_PATH,"error":message,"action":"Verify the RapidAPI subscription, API key, host and endpoint access in the RapidAPI console."}
     try:
         c = db()
         if c.pg:
