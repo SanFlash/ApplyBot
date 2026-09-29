@@ -1333,19 +1333,14 @@ def run_discovery(body):
         errors.append({"source": "database", "error": str(exc)[:1500]})
         results = []
 
+    # import_job_items already returned the normalized experience/salary values.
+    # Do not open a new PostgreSQL connection for every result: large Jobicy
+    # batches can contain 100+ jobs and the per-row connections can exhaust or
+    # stall a small Render instance.
     qualified = []
     for r in results:
         exp_value = r.get("experience_min")
         salary_value = r.get("salary_max")
-        try:
-            c = db()
-            row = c.execute("SELECT experience_min,salary_max FROM jobs WHERE id=?", (r.get("job_id"),)).fetchone()
-            c.close()
-            if row:
-                exp_value, salary_value = row["experience_min"], row["salary_max"]
-        except Exception as exc:
-            errors.append({"source": "database", "error": "Qualification lookup failed: " + str(exc)[:1000]})
-
         exp_ok = exp_value is None or float(exp_value) <= max_experience
         salary_ok = salary_value is None or float(salary_value) >= min_salary
         threshold_ok = float(r.get("score") or 0) >= threshold
