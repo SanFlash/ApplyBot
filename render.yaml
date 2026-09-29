@@ -20,6 +20,18 @@ services:
         sync: false
       - key: CANDIDATE_PHONE
         sync: false
+      - key: JOBVETTA_API_KEY
+        sync: false
+      - key: JOBVETTA_API_URL
+        value: "https://api.jobvetta.com/v1/jobs"
+      - key: INDIANAPI_KEY
+        sync: false
+      - key: INDIANAPI_URL
+        value: "https://jobs.indianapi.in/jobs"
+      - key: THEMUSE_API_KEY
+        sync: false
+      - key: REMOTEOK_ENABLED
+        value: "true"
       - key: JOBICY_API_URL
         value: "https://jobicy.com/api/v2/remote-jobs"
       - key: JOBICY_API_KEY
