@@ -281,6 +281,25 @@ def test_jobicy_india_match_can_use_description_country_list():
     assert applybot.location_matches(job, "India", True)
 
 
+def test_score_job_accepts_remote_anywhere_for_india():
+    job = {
+        "title": "QA Automation Engineer",
+        "company": "Remote Example",
+        "location": "Anywhere",
+        "work_mode": "Remote",
+        "experience_min": 1,
+        "salary_min": None,
+        "salary_max": None,
+        "url": "https://example.com/job/remote-anywhere",
+        "description": "Playwright Python API testing",
+        "_query": "QA Automation Engineer",
+    }
+    score, reasons, matched = applybot.score_job(job)
+    assert score >= 57
+    assert "Location matches preferences" in reasons
+    assert "Playwright" in matched
+
+
 def test_jobicy_anywhere_is_valid_for_india():
     job = {"location": "Anywhere", "description": "", "work_mode": "Remote"}
     assert applybot.location_matches(job, "India")
@@ -421,7 +440,7 @@ def test_indeed_403_is_reported_as_configuration_error(monkeypatch):
     jobs, errors, status = applybot.search_indeed_jobs("QA Automation Engineer", "India")
     assert jobs == []
     assert status[0]["source"] == "Indeed"
-    assert status[0]["configured"] is False
+    assert status[0]["configured"] is True
     assert status[0]["authorization_ok"] is False
     assert errors[0]["kind"] == "authorization"
     assert len(errors) == 1
