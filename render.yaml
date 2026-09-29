@@ -25,7 +25,7 @@ services:
       - key: FREE_JOB_DATASET_ENABLED
         value: "true"
       - key: FREE_JOB_DATASET_URL
-        value: "https://raw.githubusercontent.com/ConorsCode/open-jobs-data/main/data/jobs.json"
+        value: "https://cdn.jsdelivr.net/gh/ConorsCode/open-jobs-data@main/data/jobs.json"
       - key: FREE_JOB_DATASET_TIMEOUT
         value: "30"
       - key: FREE_JOB_DATASET_CACHE_SECONDS
