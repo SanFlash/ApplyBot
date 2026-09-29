@@ -257,6 +257,23 @@ def test_jobicy_search_tag_prefers_qa():
     assert applybot._jobicy_search_tag("QA Automation Engineer") == "qa"
 
 
+def test_jobicy_search_tags_expand_qa_recall():
+    assert applybot._jobicy_search_tags("QA Automation Engineer") == ["qa", "automation", "sdet"]
+
+
+def test_job_query_filter_rejects_unrelated_qa_tag_results():
+    unrelated = {
+        "title": "Director of Product Management - US Remote",
+        "description": "Product strategy, roadmaps, stakeholder management.",
+    }
+    relevant = {
+        "title": "Senior QA Automation Engineer",
+        "description": "Playwright, Python, API testing and CI/CD.",
+    }
+    assert not applybot.job_matches_query(unrelated, "QA Automation Engineer")
+    assert applybot.job_matches_query(relevant, "QA Automation Engineer")
+
+
 def test_jobicy_provider_is_public(monkeypatch):
     def fake_fetch(url, params, **kwargs):
         assert "jobicy.com/api/v2/remote-jobs" in url
