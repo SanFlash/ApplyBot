@@ -57,6 +57,9 @@ INDEED_USD_TO_INR = float(os.getenv("INDEED_USD_TO_INR", "0") or 0)
 ENABLE_LEGACY_SOURCES = os.getenv("ENABLE_LEGACY_SOURCES", "false").lower() == "true"
 GREENHOUSE_BOARDS = [x.strip() for x in os.getenv("GREENHOUSE_BOARDS", "").split(",") if x.strip()]
 LEVER_COMPANIES = [x.strip() for x in os.getenv("LEVER_COMPANIES", "").split(",") if x.strip()]
+ASHBY_BOARDS = [x.strip() for x in os.getenv("ASHBY_BOARDS", "").split(",") if x.strip()]
+BRAVE_SEARCH_API_KEY = os.getenv("BRAVE_SEARCH_API_KEY", "").strip()
+BRAVE_SEARCH_ENABLED = os.getenv("BRAVE_SEARCH_ENABLED", "true").lower() == "true"
 
 def resume_file_path():
     configured = RESUME_PATH or str(DATA / "resume.pdf")
@@ -1234,8 +1237,8 @@ def search_public_sources(query, location="", remote=False):
     The legacy provider implementation remains in this file for compatibility,
     but the active discovery path no longer depends on Indeed/RapidAPI.
     """
-    from providers_v2 import search_public_sources as discover_v2
-    return discover_v2(query, location, remote)
+    from providers_v3 import search_public_sources as discover_v3
+    return discover_v3(query, location, remote)
 
 
 def import_job_items(items):
@@ -1471,7 +1474,7 @@ def provider_check():
     """Live smoke test for the active discovery stack and database."""
     result = {
         "service": "ApplyBot",
-        "strategy": "Jobicy + The Muse + RemoteOK + configured employer ATS APIs",
+        "strategy": "Employer ATS + career-site JSON-LD discovery + The Muse/RemoteOK/Jobicy fallbacks",
         "database": "postgres" if is_postgres() else "sqlite",
     }
 
@@ -1558,6 +1561,9 @@ def config_status():
         "resume_configured": resume_file_path().is_file(),
         "supported_browser_adapters": ["greenhouse", "lever", "workable", "ashby", "smartrecruiters"],
         "discovery_sources": {
+            "CareerWebSearch": bool(BRAVE_SEARCH_API_KEY) and BRAVE_SEARCH_ENABLED,
+            "CareerWebSearch_provider": "Brave Search API + JobPosting JSON-LD" if BRAVE_SEARCH_API_KEY and BRAVE_SEARCH_ENABLED else "API key required",
+            "Ashby": len(ASHBY_BOARDS),
             "Jobicy": True,
             "Jobicy_provider": "Jobicy Commercial API" if JOBICY_API_KEY else "Jobicy Public REST API",
             "Jobicy_direct_application_urls": bool(JOBICY_API_KEY),
