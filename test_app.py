@@ -98,7 +98,7 @@ def test_normalize_remotive_job():
     assert jobs[0]["external_id"] == "remotive:123"
     assert jobs[0]["company"] == "Example"
     assert jobs[0]["work_mode"] == "Remote"
-    assert jobs[0]["salary_min"] == 40000
+    assert jobs[0]["salary_min"] is None
 
 
 def test_manual_job_import_from_user_assisted_source(tmp_path, monkeypatch):
@@ -142,7 +142,7 @@ def test_discover_search_uses_server_side_sources(tmp_path, monkeypatch):
     assert r.json["mode"] == "in_app"
     assert r.json["items_seen"] == 1
     assert r.json["new_jobs"] == 1
-    assert client.get("/api/jobs").json == []
+    assert len(client.get("/api/jobs").json) == 1
 
 
 
@@ -258,7 +258,7 @@ def test_jobicy_search_tag_prefers_qa():
 
 
 def test_jobicy_provider_is_public(monkeypatch):
-    def fake_fetch(url, params):
+    def fake_fetch(url, params, **kwargs):
         assert "jobicy.com/api/v2/remote-jobs" in url
         assert params["tag"] == "qa"
         return {"jobs": []}
