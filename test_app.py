@@ -191,7 +191,7 @@ def test_auto_apply_is_threshold_gated(tmp_path, monkeypatch):
         "salary_max": 6,
         "experience_min": 1,
         "url": "https://example.com/jobs/threshold-1",
-        "description": "Playwright Python API testing",
+        "description": "QA Automation Engineer, 1 year experience, 4-6 LPA",
     }
     client.post("/api/jobs/import", json={"jobs": [job]})
     job_row = client.get("/api/jobs").json[0]
