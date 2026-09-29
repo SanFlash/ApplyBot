@@ -18,8 +18,13 @@ import urllib.request
 
 FREE_DATASET_URL = os.getenv(
     "FREE_JOB_DATASET_URL",
-    "https://raw.githubusercontent.com/ConorsCode/open-jobs-data/main/data/jobs.json",
+    "https://cdn.jsdelivr.net/gh/ConorsCode/open-jobs-data@main/data/jobs.json",
 ).strip()
+FREE_DATASET_FALLBACK_URLS = [
+    FREE_DATASET_URL,
+    "https://raw.githubusercontent.com/ConorsCode/open-jobs-data/main/data/jobs.json",
+    "https://cdn.jsdelivr.net/gh/ConorsCode/open-jobs-data/main/data/jobs.json",
+]
 FREE_DATASET_ENABLED = os.getenv("FREE_JOB_DATASET_ENABLED", "true").lower() == "true"
 FREE_DATASET_TIMEOUT = max(5, int(os.getenv("FREE_JOB_DATASET_TIMEOUT", "25")))
 FREE_DATASET_CACHE_SECONDS = max(60, int(os.getenv("FREE_JOB_DATASET_CACHE_SECONDS", "900")))
@@ -125,21 +130,47 @@ def _fetch_dataset():
     now = time.time()
     if _cache["jobs"] is not None and now - _cache["at"] < FREE_DATASET_CACHE_SECONDS:
         return _cache["jobs"], None
-    req = urllib.request.Request(
-        FREE_DATASET_URL,
-        headers={"User-Agent": "ApplyBot/4.0 (+public-job-discovery)", "Accept": "application/json"},
+
+    last_error = None
+    seen_urls = set()
+    for url in FREE_DATASET_FALLBACK_URLS:
+        if not url or url in seen_urls:
+            continue
+        seen_urls.add(url)
+        try:
+            req = urllib.request.Request(
+                url,
+                headers={
+                    "User-Agent": "ApplyBot/5.0 (+public-job-discovery)",
+                    "Accept": "application/json",
+                    "Cache-Control": "no-cache",
+                },
+            )
+            with urllib.request.urlopen(req, timeout=FREE_DATASET_TIMEOUT) as response:
+                payload = json.loads(response.read().decode("utf-8"))
+            if not isinstance(payload, list):
+                raise ValueError("free ATS dataset did not return a JSON array")
+
+            rows = []
+            for raw in payload:
+                job = _normalize(raw)
+                if job:
+                    rows.append(job)
+
+            if rows:
+                _cache.update({"at": now, "jobs": rows})
+                return rows, None
+            last_error = ValueError("free ATS dataset returned zero usable jobs")
+        except Exception as exc:
+            last_error = exc
+
+    if _cache["jobs"] is not None:
+        return _cache["jobs"], "Using stale cached free ATS data after upstream fetch failure"
+
+    raise RuntimeError(
+        "Free ATS discovery is temporarily unavailable. "
+        f"Tried {len(seen_urls)} public endpoints. Last error: {last_error}"
     )
-    with urllib.request.urlopen(req, timeout=FREE_DATASET_TIMEOUT) as response:
-        payload = json.loads(response.read().decode("utf-8"))
-    if not isinstance(payload, list):
-        raise ValueError("free ATS dataset did not return a JSON array")
-    rows = []
-    for raw in payload:
-        job = _normalize(raw)
-        if job:
-            rows.append(job)
-    _cache.update({"at": now, "jobs": rows})
-    return rows, None
 
 
 def _dedupe(jobs):
