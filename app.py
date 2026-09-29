@@ -1479,6 +1479,21 @@ def provider_check():
     }
 
     try:
+        if BRAVE_SEARCH_API_KEY and BRAVE_SEARCH_ENABLED:
+            from providers_v3 import _brave_search, _brave_results
+            data = _brave_search(None, "QA Automation Engineer India jobs careers apply", "India")
+            result["career_web_search"] = {
+                "ok": bool(_brave_results(data)),
+                "count": len(_brave_results(data)),
+                "sample_urls": [x.get("url") for x in _brave_results(data)[:5]],
+                "provider": "Brave Search API",
+            }
+        else:
+            result["career_web_search"] = {"ok": False, "configured": False}
+    except Exception as exc:
+        result["career_web_search"] = {"ok": False, "error": str(exc)[:1000]}
+
+    try:
         data = fetch_json(JOBICY_API_URL, {"count": 5, "tag": "qa"}, timeout=JOBICY_TIMEOUT)
         jobs = normalize_jobicy_jobs(data)
         result["jobicy"] = {
@@ -1535,7 +1550,8 @@ def provider_check():
         result["database_schema"] = {"ok": False, "error": str(exc)[:1000]}
 
     result["ok"] = bool(
-        result.get("jobicy", {}).get("ok")
+        result.get("career_web_search", {}).get("ok")
+        or result.get("jobicy", {}).get("ok")
         or result.get("muse", {}).get("ok")
         or result.get("remoteok", {}).get("ok")
     ) and bool(result.get("database_schema", {}).get("ok"))
