@@ -323,9 +323,9 @@ https://github.com/SanFlash/ApplyBot
 
 ## Multi-source job discovery
 
-ApplyBot now supports multiple in-app discovery providers. For India, **Jobvetta** is the preferred additional provider: its free API provides live India jobs gathered from official employer sources, with 50 API requests per key per UTC day. IndianAPI can also be enabled with its free API key. RemoteOK is enabled for remote-only searches. Adzuna and Arbeitnow remain optional legacy providers. citeturn2view0turn2view1
+ApplyBot now supports multiple in-app discovery providers. For India, **Jobvetta** is the preferred additional provider: its free API provides live India jobs gathered from official employer sources, with 50 API requests per key per UTC day. IndianAPI can also be enabled with its free API key. RemoteOK is enabled for remote-only searches. Adzuna and Arbeitnow remain optional legacy providers.
 
-LinkedIn and Indeed are **not scraped**. LinkedIn's current terms prohibit automated scraping/data extraction without written authorization, and Indeed's developer access is controlled through approved API/integration terms. ApplyBot therefore exposes these as official-API-ready providers rather than using an unauthorized scraper. citeturn0search0turn0search1turn0search2
+LinkedIn and Indeed are **not scraped**. LinkedIn's current terms prohibit automated scraping/data extraction without written authorization, and Indeed's developer access is controlled through approved API/integration terms. ApplyBot therefore exposes these as official-API-ready providers rather than using an unauthorized scraper.
 
 To enable India sources on Render:
 1. Create a free Jobvetta API key.
