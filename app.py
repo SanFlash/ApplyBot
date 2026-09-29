@@ -1233,8 +1233,7 @@ def import_job_items(items):
                 job_id=existing_by_ext[ext]
                 c.execute("UPDATE jobs SET source=?,title=?,company=?,location=?,work_mode=?,salary_min=?,salary_max=?,experience_min=?,source_url=?,url=?,description=?,discovered_at=?,match_score=?,status=?,skip_reason=?,match_reasons=?,matched_skills=? WHERE id=?",(j.get("source","manual"),j["title"],j["company"],j.get("location",""),j.get("work_mode",""),smin,smax,exp,j.get("source_url",j["url"]),j["url"],j["description"],utcnow(),sc,status,"; ".join(reasons),"; ".join(reasons),json.dumps(matched),job_id)); duplicate=True
             else:
-                savepoint=f"job_import_{index}
-"
+                savepoint=f"job_import_{index}"
                 try:
                     savepoint=savepoint.strip(); c.execute(f"SAVEPOINT {savepoint}")
                     params=(ext,j.get("source","manual"),j["title"],j["company"],j.get("location",""),j.get("work_mode",""),smin,smax,exp,j.get("source_url",j["url"]),j["url"],j["description"],utcnow(),sc,status,"; ".join(reasons),"; ".join(reasons),json.dumps(matched))
