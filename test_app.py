@@ -284,3 +284,40 @@ def test_jobicy_anywhere_is_valid_for_india():
     job = {"location": "Anywhere", "description": "", "work_mode": "Remote"}
     assert applybot.location_matches(job, "India")
     assert applybot.location_matches(job, "India", True)
+
+
+def test_discovery_duplicate_import_does_not_abort_transaction(tmp_path, monkeypatch):
+    client = setup_db(tmp_path, monkeypatch)
+
+    def fake_search(query, location="", remote=False):
+        return ([{
+            "external_id": "duplicate-1",
+            "source": "Jobicy",
+            "title": "QA Automation Engineer",
+            "company": "Example",
+            "location": "Indore",
+            "work_mode": "Hybrid",
+            "salary_min": 4,
+            "salary_max": 6,
+            "experience_min": 1,
+            "url": "https://example.com/jobs/duplicate-1",
+            "description": "Playwright Python API testing, 1 year experience",
+        }], [], [{"source": "Jobicy", "found": 1, "configured": True}])
+
+    monkeypatch.setattr(applybot, "search_public_sources", fake_search)
+
+    first = client.post("/api/discover", json={
+        "query": "QA Automation Engineer", "location": "Indore",
+        "threshold": 50, "max_experience": 2, "min_salary": 3,
+    })
+    second = client.post("/api/discover", json={
+        "query": "QA Automation Engineer", "location": "Indore",
+        "threshold": 50, "max_experience": 2, "min_salary": 3,
+    })
+
+    assert first.status_code == 200
+    assert second.status_code == 200
+    assert first.json["qualified_jobs"] == 1
+    assert second.json["qualified_jobs"] == 1
+    assert not any(e.get("source") == "database" for e in second.json.get("errors", []))
+    assert len(client.get("/api/jobs").json) == 1
