@@ -1014,59 +1014,107 @@ def search_public_sources(query, location="", remote=False):
 def import_job_items(items):
     c = db()
     created = []
-    for j in items:
-        if not all(j.get(k) for k in ["title", "company", "url", "description"]):
-            continue
-        ext = j.get("external_id") or job_fingerprint(j)
-        smin, smax = j.get("salary_min"), j.get("salary_max")
-        if smin is None and smax is None:
-            smin, smax = extract_salary(j["description"])
-        exp = j.get("experience_min")
-        if exp is None:
-            exp = extract_experience(j["description"])
-        base = {**j, "salary_min": smin, "salary_max": smax, "experience_min": exp}
-        try:
-            if AI_PROVIDER != "none":
-                from ai_engine import extract_job_intelligence
-                intel = extract_job_intelligence(base["title"], base["description"])
-                if isinstance(intel, dict):
-                    if base.get("experience_min") is None and intel.get("experience_years") is not None:
-                        base["experience_min"] = float(intel["experience_years"])
-                    if base.get("salary_min") is None and intel.get("salary_min_lpa") is not None:
-                        base["salary_min"] = float(intel["salary_min_lpa"])
-                    if base.get("salary_max") is None and intel.get("salary_max_lpa") is not None:
-                        base["salary_max"] = float(intel["salary_max_lpa"])
-                    ai_skills = intel.get("required_skills") or []
-                    base["_ai_skills"] = ai_skills
-        except Exception:
-            pass
-        sc, reasons, matched = score_job(base)
-        ai_skills = base.get("_ai_skills") or []
-        if ai_skills:
-            matched = list(dict.fromkeys(matched + [str(x) for x in ai_skills if str(x).strip()]))
-            reasons.append("AI extracted required skills")
-        status = "ready" if sc > 0 else "skipped"
-        try:
-            c.execute(
-                """INSERT INTO jobs(external_id,source,title,company,location,work_mode,salary_min,salary_max,
-                experience_min,source_url,url,description,discovered_at,match_score,status,skip_reason,match_reasons,matched_skills)
-                VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
-                (ext, j.get("source", "manual"), j["title"], j["company"], j.get("location", ""),
-                 j.get("work_mode", ""), smin, smax, exp, j.get("source_url", j["url"]), j["url"], j["description"], utcnow(), sc, status,
-                 "; ".join(reasons), json.dumps(reasons), json.dumps(matched)),
-            )
-            inserted = c.execute("SELECT id FROM jobs WHERE external_id=?", (ext,)).fetchone()
-            created.append({"job_id": inserted["id"] if inserted else None, "external_id": ext, "score": sc, "status": status, "matched_skills": matched, "reasons": reasons})
-        except Exception as exc:
-            if "unique" not in str(exc).lower() and "duplicate" not in str(exc).lower():
-                raise
+    try:
+        for index, j in enumerate(items):
+            if not all(j.get(k) for k in ["title", "company", "url", "description"]):
+                continue
+
+            ext = j.get("external_id") or job_fingerprint(j)
+            smin, smax = j.get("salary_min"), j.get("salary_max")
+            if smin is None and smax is None:
+                smin, smax = extract_salary(j["description"])
+            exp = j.get("experience_min")
+            if exp is None:
+                exp = extract_experience(j["description"])
+
+            base = {**j, "salary_min": smin, "salary_max": smax, "experience_min": exp}
+            try:
+                if AI_PROVIDER != "none":
+                    from ai_engine import extract_job_intelligence
+                    intel = extract_job_intelligence(base["title"], base["description"])
+                    if isinstance(intel, dict):
+                        if base.get("experience_min") is None and intel.get("experience_years") is not None:
+                            base["experience_min"] = float(intel["experience_years"])
+                        if base.get("salary_min") is None and intel.get("salary_min_lpa") is not None:
+                            base["salary_min"] = float(intel["salary_min_lpa"])
+                        if base.get("salary_max") is None and intel.get("salary_max_lpa") is not None:
+                            base["salary_max"] = float(intel["salary_max_lpa"])
+                        base["_ai_skills"] = intel.get("required_skills") or []
+            except Exception:
+                # AI enrichment is optional and must never break discovery.
+                pass
+
+            smin, smax, exp = base.get("salary_min"), base.get("salary_max"), base.get("experience_min")
+            sc, reasons, matched = score_job(base)
+            ai_skills = base.get("_ai_skills") or []
+            if ai_skills:
+                matched = list(dict.fromkeys(matched + [str(x) for x in ai_skills if str(x).strip()]))
+                reasons.append("AI extracted required skills")
+
+            status = "ready" if sc > 0 else "skipped"
+
+            # Check first instead of intentionally violating the UNIQUE constraint.
+            # This avoids PostgreSQL's "current transaction is aborted" state.
             existing = c.execute("SELECT id FROM jobs WHERE external_id=?", (ext,)).fetchone()
             if existing:
-                created.append({"job_id": existing["id"], "external_id": ext, "score": sc, "status": status,
-                                 "matched_skills": matched, "reasons": reasons, "duplicate": True})
-    c.commit()
-    c.close()
-    return created
+                job_id = existing["id"]
+                c.execute(
+                    """UPDATE jobs SET source=?,title=?,company=?,location=?,work_mode=?,
+                    salary_min=?,salary_max=?,experience_min=?,source_url=?,url=?,description=?,
+                    discovered_at=?,match_score=?,status=?,skip_reason=?,match_reasons=?,matched_skills=?
+                    WHERE id=?""",
+                    (j.get("source", "manual"), j["title"], j["company"], j.get("location", ""),
+                     j.get("work_mode", ""), smin, smax, exp, j.get("source_url", j["url"]),
+                     j["url"], j["description"], utcnow(), sc, status, "; ".join(reasons),
+                     json.dumps(reasons), json.dumps(matched), job_id),
+                )
+                created.append({
+                    "job_id": job_id, "external_id": ext, "score": sc, "status": status,
+                    "matched_skills": matched, "reasons": reasons, "duplicate": True
+                })
+                continue
+
+            # Isolate each insert with a savepoint so one bad provider row cannot
+            # poison the whole PostgreSQL transaction.
+            savepoint = f"job_import_{index}"
+            try:
+                c.execute(f"SAVEPOINT {savepoint}")
+                c.execute(
+                    """INSERT INTO jobs(external_id,source,title,company,location,work_mode,salary_min,salary_max,
+                    experience_min,source_url,url,description,discovered_at,match_score,status,skip_reason,match_reasons,matched_skills)
+                    VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                    (ext, j.get("source", "manual"), j["title"], j["company"], j.get("location", ""),
+                     j.get("work_mode", ""), smin, smax, exp, j.get("source_url", j["url"]), j["url"],
+                     j["description"], utcnow(), sc, status, "; ".join(reasons), json.dumps(reasons), json.dumps(matched)),
+                )
+                inserted = c.execute("SELECT id FROM jobs WHERE external_id=?", (ext,)).fetchone()
+                c.execute(f"RELEASE SAVEPOINT {savepoint}")
+                created.append({
+                    "job_id": inserted["id"] if inserted else None, "external_id": ext, "score": sc,
+                    "status": status, "matched_skills": matched, "reasons": reasons
+                })
+            except Exception as exc:
+                c.execute(f"ROLLBACK TO SAVEPOINT {savepoint}")
+                c.execute(f"RELEASE SAVEPOINT {savepoint}")
+                # A concurrent insert can still win the race after our pre-check.
+                if "unique" in str(exc).lower() or "duplicate" in str(exc).lower():
+                    existing = c.execute("SELECT id FROM jobs WHERE external_id=?", (ext,)).fetchone()
+                    if existing:
+                        created.append({
+                            "job_id": existing["id"], "external_id": ext, "score": sc,
+                            "status": status, "matched_skills": matched, "reasons": reasons,
+                            "duplicate": True
+                        })
+                        continue
+                raise
+
+        c.commit()
+        return created
+    except Exception:
+        c.conn.rollback()
+        raise
+    finally:
+        c.close()
 
 
 @app.get("/")
