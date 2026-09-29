@@ -1237,8 +1237,8 @@ def search_public_sources(query, location="", remote=False):
     The legacy provider implementation remains in this file for compatibility,
     but the active discovery path no longer depends on Indeed/RapidAPI.
     """
-    from providers_v3 import search_public_sources as discover_v3
-    return discover_v3(query, location, remote)
+    from providers_v4 import search_public_sources as discover_v4
+    return discover_v4(query, location, remote)
 
 
 def import_job_items(items):
