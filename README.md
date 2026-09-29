@@ -321,6 +321,21 @@ GitHub:
 https://github.com/SanFlash/ApplyBot
 
 
+## Multi-source job discovery
+
+ApplyBot now supports multiple in-app discovery providers. For India, **Jobvetta** is the preferred additional provider: its free API provides live India jobs gathered from official employer sources, with 50 API requests per key per UTC day. IndianAPI can also be enabled with its free API key. RemoteOK is enabled for remote-only searches. Adzuna and Arbeitnow remain optional legacy providers. citeturn2view0turn2view1
+
+LinkedIn and Indeed are **not scraped**. LinkedIn's current terms prohibit automated scraping/data extraction without written authorization, and Indeed's developer access is controlled through approved API/integration terms. ApplyBot therefore exposes these as official-API-ready providers rather than using an unauthorized scraper. citeturn0search0turn0search1turn0search2
+
+To enable India sources on Render:
+1. Create a free Jobvetta API key.
+2. In Render → ApplyBot → Environment, set `JOBVETTA_API_KEY`.
+3. Optionally create an IndianAPI key and set `INDIANAPI_KEY`.
+4. Redeploy.
+5. Search **QA Automation Engineer / Automation Tester / SDET** with **India**.
+6. The Results section will show the provider/source, source URL, score, matched skills and qualification reason.
+7. Auto-apply remains limited to supported employer ATS forms; aggregator pages are discovery sources, not automatically submitted applications.
+
 ## Complete setup and verification
 
 ### 1. Open the deployed application
