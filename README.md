@@ -527,6 +527,7 @@ INDEED_RAPIDAPI_ENABLED=true
 INDEED_RAPIDAPI_KEY=YOUR_RAPIDAPI_KEY
 INDEED_RAPIDAPI_HOST=indeed-jobs-api.p.rapidapi.com
 INDEED_RAPIDAPI_URL=https://indeed-jobs-api.p.rapidapi.com
+INDEED_RAPIDAPI_PATH=/jobs
 INDEED_MAX_PAGES=2
 INDEED_MAX_QUERIES=3
 INDEED_DATE_POSTED=7
@@ -565,3 +566,25 @@ python app.py
 ```
 
 Then open `http://localhost:8000`, search for `QA Automation Engineer`, select `India`, and inspect the source/provider column for **Indeed RapidAPI**.
+
+
+### 403 troubleshooting
+
+If the diagnostics show:
+
+```
+HTTP 403: Forbidden
+```
+
+the request reached the RapidAPI gateway but access was refused. RapidAPI requires valid `X-RapidAPI-Key` and `X-RapidAPI-Host` headers, and its documentation notes that invalid RapidAPI authentication headers can produce 4xx responses. citeturn0search0turn0search1
+
+For the Indeed API you provided, verify all three items in RapidAPI:
+
+1. Your account is subscribed to the **Indeed API** shown in your RapidAPI workspace.
+2. The Render value of `INDEED_RAPIDAPI_KEY` is the current key from the same RapidAPI app/account.
+3. The host is exactly `indeed-jobs-api.p.rapidapi.com`.
+
+Use the API playground's generated code snippet as the source of truth for the host/key pair. The API documentation supplied for this project specifies `GET /jobs`, `query` as required, `country=IN` for India, and 15 results per page.
+
+ApplyBot now stops additional Indeed query variants after the first authorization failure, so a bad key does not waste three search variants or make the rest of discovery fail. Jobicy and other configured providers continue normally.
+
