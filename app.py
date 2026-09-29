@@ -1229,50 +1229,15 @@ def location_matches(job, location, remote=False):
 
 
 def search_public_sources(query, location="", remote=False):
-    query = (query or "").strip() or "QA Automation Engineer"
-    results, errors, source_status = search_jobicy_jobs(query, location, remote)
-    extra_results, extra_errors, extra_status = search_additional_providers(query, location, remote)
-    results.extend(extra_results)
-    errors.extend(extra_errors)
-    source_status.extend(extra_status)
+    """Delegate discovery to the resilient multi-provider engine.
 
-    # Optional legacy providers remain available when explicitly enabled.
-    if ENABLE_LEGACY_SOURCES:
-        if ADZUNA_APP_ID and ADZUNA_APP_KEY:
-            try:
-                data = fetch_json("https://api.adzuna.com/v1/api/jobs/in/search/1", {
-                    "app_id": ADZUNA_APP_ID, "app_key": ADZUNA_APP_KEY, "results_per_page": "50",
-                    "what": query, "where": location or "India", "content-type": "application/json", "sort_by": "date",
-                })
-                rows = normalize_adzuna_jobs(data)
-                results.extend([j for j in rows if location_matches(j, location, remote)])
-                source_status.append({"source": "Adzuna", "found": len(rows), "configured": True, "provider":"Adzuna API"})
-            except Exception as exc:
-                errors.append({"source": "Adzuna", "error": str(exc)[:1000]})
-                source_status.append({"source": "Adzuna", "found": 0, "configured": True, "provider":"Adzuna API"})
-        else:
-            source_status.append({"source": "Adzuna", "found": 0, "configured": False, "provider":"Adzuna API — app key required"})
-        try:
-            rows = normalize_arbeitnow_jobs(fetch_json("https://www.arbeitnow.com/api/job-board-api"))
-            q_tokens = tokens(query)
-            selected = [j for j in rows if (not q_tokens or sum(1 for token in q_tokens if token in (j["title"]+" "+j["description"]).lower()) >= max(1,min(3,len(q_tokens))))]
-            results.extend([j for j in selected if location_matches(j, location, remote)])
-            source_status.append({"source":"Arbeitnow","found":len(selected),"configured":True,"provider":"Arbeitnow public API"})
-        except Exception as exc:
-            errors.append({"source":"Arbeitnow","error":str(exc)[:1000]})
-            source_status.append({"source":"Arbeitnow","found":0,"configured":True,"provider":"Arbeitnow public API"})
+    The legacy provider implementation remains in this file for compatibility,
+    but the active discovery path no longer depends on Indeed/RapidAPI.
+    """
+    from providers_v2 import search_public_sources as discover_v2
+    return discover_v2(query, location, remote)
 
-    filtered, seen = [], set()
-    for job in results:
-        if not job.get("title") or not job.get("company") or not job.get("url"):
-            continue
-        key = job.get("external_id") or job_fingerprint(job)
-        if key in seen:
-            continue
-        seen.add(key)
-        job["_query"] = query
-        filtered.append(job)
-    return filtered, errors, source_status
+
 def import_job_items(items):
     """Persist a discovery batch efficiently without one SQL round-trip/savepoint per job."""
     c = db()
