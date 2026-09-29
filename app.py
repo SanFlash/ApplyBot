@@ -24,6 +24,12 @@ CANDIDATE_PHONE = os.getenv("CANDIDATE_PHONE", "").strip()
 RESUME_PATH = os.getenv("RESUME_PATH", "").strip()
 ADZUNA_APP_ID = os.getenv("ADZUNA_APP_ID", "").strip()
 ADZUNA_APP_KEY = os.getenv("ADZUNA_APP_KEY", "").strip()
+JOBVETTA_API_KEY = os.getenv("JOBVETTA_API_KEY", "").strip()
+JOBVETTA_API_URL = os.getenv("JOBVETTA_API_URL", "https://api.jobvetta.com/v1/jobs").strip()
+INDIANAPI_KEY = os.getenv("INDIANAPI_KEY", "").strip()
+INDIANAPI_URL = os.getenv("INDIANAPI_URL", "https://jobs.indianapi.in/jobs").strip()
+THEMUSE_API_KEY = os.getenv("THEMUSE_API_KEY", "").strip()
+REMOTEOK_ENABLED = os.getenv("REMOTEOK_ENABLED", "true").lower() == "true"
 JOBICY_API_URL = os.getenv("JOBICY_API_URL", "https://jobicy.com/api/v2/remote-jobs").strip()
 JOBICY_API_KEY = os.getenv("JOBICY_API_KEY", "").strip()
 JOBICY_COUNT = min(200, max(1, int(os.getenv("JOBICY_COUNT", "200"))))
@@ -505,6 +511,160 @@ def normalize_jobicy_jobs(data):
     return jobs
 
 
+def normalize_jobvetta_jobs(data):
+    rows = data.get("jobs", []) if isinstance(data, dict) else []
+    jobs = []
+    for raw in rows:
+        if not isinstance(raw, dict):
+            continue
+        title = str(raw.get("title") or "").strip()
+        company = str(raw.get("company") or "Unknown").strip()
+        url = str(raw.get("url") or "").strip()
+        location = str(raw.get("location") or "India").strip()
+        if not title or not url:
+            continue
+        description = strip_html(raw.get("description") or " ".join(raw.get("skills_required") or []))
+        salary_min = raw.get("salary_min")
+        salary_max = raw.get("salary_max")
+        currency = str(raw.get("salary_currency") or "INR").upper()
+        if currency == "INR":
+            try:
+                salary_min = float(salary_min) / 100000 if salary_min is not None else None
+                salary_max = float(salary_max) / 100000 if salary_max is not None else None
+            except (TypeError, ValueError):
+                salary_min = salary_max = None
+        else:
+            salary_min = salary_max = None
+        jobs.append({
+            "external_id": "jobvetta:" + str(raw.get("job_id") or url),
+            "source": "Jobvetta",
+            "source_url": url,
+            "title": title,
+            "company": company,
+            "location": location,
+            "work_mode": str(raw.get("work_model") or ""),
+            "salary_min": salary_min,
+            "salary_max": salary_max,
+            "experience_min": extract_experience(description + " " + str(raw.get("experience_level") or "")),
+            "url": url,
+            "description": description or title,
+            "employment_type": str(raw.get("employment_type") or ""),
+            "posted_at": str(raw.get("created_at") or ""),
+        })
+    return jobs
+
+
+def normalize_indianapi_jobs(data):
+    rows = data.get("jobs", []) if isinstance(data, dict) and isinstance(data.get("jobs"), list) else (data if isinstance(data, list) else [])
+    jobs = []
+    for raw in rows:
+        if not isinstance(raw, dict):
+            continue
+        title = str(raw.get("title") or raw.get("job_title") or "").strip()
+        company = str(raw.get("company") or "Unknown").strip()
+        url = str(raw.get("apply_link") or raw.get("url") or "").strip()
+        location = str(raw.get("location") or "India").strip()
+        description = strip_html(" ".join(str(raw.get(k) or "") for k in ("job_description","role_and_responsibility","education_and_skills","about_company")))
+        if not title or not url:
+            continue
+        smin, smax = extract_salary(description)
+        exp = extract_experience(description + " " + str(raw.get("experience") or ""))
+        jobs.append({
+            "external_id": "indianapi:" + str(raw.get("id") or url),
+            "source": "IndianAPI",
+            "source_url": url,
+            "title": title,
+            "company": company,
+            "location": location,
+            "work_mode": "Remote" if "remote" in (location + " " + description).lower() else "",
+            "salary_min": smin,
+            "salary_max": smax,
+            "experience_min": exp,
+            "url": url,
+            "description": description or title,
+            "employment_type": str(raw.get("job_type") or ""),
+            "posted_at": str(raw.get("posted_date") or ""),
+        })
+    return jobs
+
+
+def normalize_remoteok_jobs(data):
+    rows = data if isinstance(data, list) else []
+    jobs = []
+    for raw in rows:
+        if not isinstance(raw, dict) or not raw.get("position") or not raw.get("url"):
+            continue
+        title = str(raw.get("position")).strip()
+        company = str(raw.get("company") or "Unknown").strip()
+        description = strip_html(raw.get("description") or "")
+        salary_text = str(raw.get("salary") or "")
+        smin, smax = parse_salary_text(salary_text)
+        jobs.append({
+            "external_id": "remoteok:" + str(raw.get("id") or raw.get("url")),
+            "source": "RemoteOK",
+            "source_url": str(raw.get("url")),
+            "title": title,
+            "company": company,
+            "location": str(raw.get("location") or "Worldwide").strip(),
+            "work_mode": "Remote",
+            "salary_min": None,
+            "salary_max": None,
+            "experience_min": extract_experience(description),
+            "url": str(raw.get("url")),
+            "description": description or title,
+            "employment_type": "",
+            "posted_at": str(raw.get("date") or raw.get("published_at") or ""),
+        })
+    return jobs
+
+
+def search_additional_providers(query, location="", remote=False):
+    results, errors, status = [], [], []
+
+    if JOBVETTA_API_KEY and (not location or "india" in location.lower() or location.lower() in {"ind", "bengaluru", "bangalore", "pune", "mumbai", "hyderabad", "indore", "delhi", "noida", "gurgaon", "gurugram"}):
+        try:
+            data = fetch_json(JOBVETTA_API_URL, {"q": query, "location": location or "India", "days": 30, "limit": 10},
+                              headers={"Authorization": f"Bearer {JOBVETTA_API_KEY}"}, timeout=JOBICY_TIMEOUT)
+            rows = normalize_jobvetta_jobs(data)
+            rows = [j for j in rows if location_matches(j, location, remote)]
+            results.extend(rows)
+            status.append({"source":"Jobvetta","found":len(rows),"configured":True,"provider":"Jobvetta Free India API"})
+        except Exception as exc:
+            errors.append({"source":"Jobvetta","error":str(exc)[:1000]})
+            status.append({"source":"Jobvetta","found":0,"configured":True,"provider":"Jobvetta Free India API"})
+    else:
+        status.append({"source":"Jobvetta","found":0,"configured":False,"provider":"Free India API — API key required"})
+
+    if INDIANAPI_KEY:
+        try:
+            data = fetch_json(INDIANAPI_URL, {"limit":"50","title":query,"location":location or "India"},
+                              headers={"X-Api-Key": INDIANAPI_KEY}, timeout=JOBICY_TIMEOUT)
+            rows = normalize_indianapi_jobs(data)
+            rows = [j for j in rows if location_matches(j, location, remote)]
+            results.extend(rows)
+            status.append({"source":"IndianAPI","found":len(rows),"configured":True,"provider":"IndianAPI Free Jobs API"})
+        except Exception as exc:
+            errors.append({"source":"IndianAPI","error":str(exc)[:1000]})
+            status.append({"source":"IndianAPI","found":0,"configured":True,"provider":"IndianAPI Free Jobs API"})
+    else:
+        status.append({"source":"IndianAPI","found":0,"configured":False,"provider":"Free India Jobs API — API key required"})
+
+    if REMOTEOK_ENABLED and (remote or not location or location.lower() in {"remote","anywhere","worldwide"}):
+        try:
+            rows = normalize_remoteok_jobs(fetch_json("https://remoteok.com/api"))
+            q = query.lower()
+            rows = [j for j in rows if q in (j["title"] + " " + j["description"]).lower()]
+            results.extend(rows[:100])
+            status.append({"source":"RemoteOK","found":len(rows[:100]),"configured":True,"provider":"RemoteOK public API"})
+        except Exception as exc:
+            errors.append({"source":"RemoteOK","error":str(exc)[:1000]})
+            status.append({"source":"RemoteOK","found":0,"configured":True,"provider":"RemoteOK public API"})
+    else:
+        status.append({"source":"RemoteOK","found":0,"configured":REMOTEOK_ENABLED,"provider":"Remote-only public API"})
+
+    return results, errors, status
+
+
 def _jobicy_geo(location):
     value = (location or "").strip().lower()
     if not value:
@@ -723,6 +883,12 @@ def location_matches(job, location, remote=False):
 def search_public_sources(query, location="", remote=False):
     query = (query or "").strip() or "QA Automation Engineer"
     results, errors, source_status = search_jobicy_jobs(query, location, remote)
+    extra_results, extra_errors, extra_status = search_additional_providers(query, location, remote)
+    results.extend(extra_results)
+    errors.extend(extra_errors)
+    source_status.extend(extra_status)
+
+    # Optional legacy providers remain available when explicitly enabled.
     if ENABLE_LEGACY_SOURCES:
         if ADZUNA_APP_ID and ADZUNA_APP_KEY:
             try:
@@ -730,45 +896,35 @@ def search_public_sources(query, location="", remote=False):
                     "app_id": ADZUNA_APP_ID, "app_key": ADZUNA_APP_KEY, "results_per_page": "50",
                     "what": query, "where": location or "India", "content-type": "application/json", "sort_by": "date",
                 })
-                rows = normalize_adzuna_jobs(data); results.extend(rows)
-                source_status.append({"source": "Adzuna", "found": len(rows), "configured": True})
+                rows = normalize_adzuna_jobs(data)
+                results.extend([j for j in rows if location_matches(j, location, remote)])
+                source_status.append({"source": "Adzuna", "found": len(rows), "configured": True, "provider":"Adzuna API"})
             except Exception as exc:
-                errors.append({"source": "Adzuna", "error": str(exc)})
-                source_status.append({"source": "Adzuna", "found": 0, "configured": True})
+                errors.append({"source": "Adzuna", "error": str(exc)[:1000]})
+                source_status.append({"source": "Adzuna", "found": 0, "configured": True, "provider":"Adzuna API"})
         else:
-            source_status.append({"source": "Adzuna", "found": 0, "configured": False})
-        for board in GREENHOUSE_BOARDS:
-            try:
-                rows = normalize_greenhouse_jobs(fetch_json(f"https://boards-api.greenhouse.io/v1/boards/{board}/jobs", {"content": "true"}), board)
-                results.extend(rows); source_status.append({"source": "Greenhouse:" + board, "found": len(rows), "configured": True})
-            except Exception as exc: errors.append({"source": "Greenhouse:" + board, "error": str(exc)})
-        for company in LEVER_COMPANIES:
-            try:
-                rows = normalize_lever_jobs(fetch_json(f"https://api.lever.co/v0/postings/{company}", {"mode": "json"}), company)
-                results.extend(rows); source_status.append({"source": "Lever:" + company, "found": len(rows), "configured": True})
-            except Exception as exc: errors.append({"source": "Lever:" + company, "error": str(exc)})
+            source_status.append({"source": "Adzuna", "found": 0, "configured": False, "provider":"Adzuna API — app key required"})
         try:
-            rows = normalize_remotive_jobs(fetch_json("https://remotive.com/api/remote-jobs", {"search": query, "limit": "50"}))
-            results.extend(rows); source_status.append({"source": "Remotive", "found": len(rows), "configured": True})
-        except Exception as exc: errors.append({"source": "Remotive", "error": str(exc)})
-        try:
-            arbeit = normalize_arbeitnow_jobs(fetch_json("https://www.arbeitnow.com/api/job-board-api"))
+            rows = normalize_arbeitnow_jobs(fetch_json("https://www.arbeitnow.com/api/job-board-api"))
             q_tokens = tokens(query)
-            for job in arbeit:
-                haystack = (job["title"] + " " + job["description"]).lower()
-                if not q_tokens or sum(1 for token in q_tokens if token in haystack) >= max(1, min(3, len(q_tokens))):
-                    results.append(job)
-            source_status.append({"source": "Arbeitnow", "found": len(arbeit), "configured": True})
-        except Exception as exc: errors.append({"source": "Arbeitnow", "error": str(exc)})
+            selected = [j for j in rows if (not q_tokens or sum(1 for token in q_tokens if token in (j["title"]+" "+j["description"]).lower()) >= max(1,min(3,len(q_tokens))))]
+            results.extend([j for j in selected if location_matches(j, location, remote)])
+            source_status.append({"source":"Arbeitnow","found":len(selected),"configured":True,"provider":"Arbeitnow public API"})
+        except Exception as exc:
+            errors.append({"source":"Arbeitnow","error":str(exc)[:1000]})
+            source_status.append({"source":"Arbeitnow","found":0,"configured":True,"provider":"Arbeitnow public API"})
+
     filtered, seen = [], set()
     for job in results:
-        if not job.get("title") or not job.get("company") or not job.get("url"): continue
-        if location and job.get("source") != "Jobicy" and not location_matches(job, location, remote): continue
+        if not job.get("title") or not job.get("company") or not job.get("url"):
+            continue
         key = job.get("external_id") or job_fingerprint(job)
-        if key in seen: continue
-        seen.add(key); job["_query"] = query; filtered.append(job)
+        if key in seen:
+            continue
+        seen.add(key)
+        job["_query"] = query
+        filtered.append(job)
     return filtered, errors, source_status
-
 def import_job_items(items):
     c = db()
     created = []
@@ -956,6 +1112,11 @@ def config_status():
             "Jobicy": True,
             "Jobicy_provider": "Jobicy Commercial API" if JOBICY_API_KEY else "Jobicy Public REST API",
             "Jobicy_direct_application_urls": bool(JOBICY_API_KEY),
+            "Jobvetta": bool(JOBVETTA_API_KEY),
+            "IndianAPI": bool(INDIANAPI_KEY),
+            "RemoteOK": REMOTEOK_ENABLED,
+            "LinkedIn": False,
+            "Indeed": False,
             "legacy_sources_enabled": ENABLE_LEGACY_SOURCES,
             "Adzuna": bool(ADZUNA_APP_ID and ADZUNA_APP_KEY),
             "Greenhouse": len(GREENHOUSE_BOARDS),
@@ -971,10 +1132,7 @@ def config_status():
 def jobs():
     try:
         c = db()
-        if ENABLE_LEGACY_SOURCES:
-            rows = c.execute("SELECT * FROM jobs ORDER BY match_score DESC, discovered_at DESC").fetchall()
-        else:
-            rows = c.execute("SELECT * FROM jobs WHERE source=? OR source LIKE 'user-assisted%%' ORDER BY match_score DESC, discovered_at DESC", ("Jobicy",)).fetchall()
+        rows = c.execute("SELECT * FROM jobs ORDER BY match_score DESC, discovered_at DESC").fetchall()
         c.close()
         payload = []
         for row in rows:
