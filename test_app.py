@@ -145,8 +145,6 @@ def test_discover_search_uses_server_side_sources(tmp_path, monkeypatch):
     assert len(client.get("/api/jobs").json) == 1
 
 
-
-
 def test_discover_search_uses_threshold_and_returns_job_ids(tmp_path, monkeypatch):
     client = setup_db(tmp_path, monkeypatch)
 
@@ -230,6 +228,7 @@ def test_auto_apply_prepares_when_disabled(tmp_path, monkeypatch):
     assert r.json["status"] == "application_ready"
     assert r.json["submitted"] is False
 
+
 def test_normalize_jobicy_job():
     jobs = applybot.normalize_jobicy_jobs({
         "jobs": [{
@@ -275,15 +274,19 @@ def test_job_query_filter_rejects_unrelated_qa_tag_results():
 
 
 def test_jobicy_provider_is_public(monkeypatch):
+    seen_tags = []
+
     def fake_fetch(url, params, **kwargs):
         assert "jobicy.com/api/v2/remote-jobs" in url
         if "tag" in params:
-            assert params["tag"] == "qa"
+            seen_tags.append(params["tag"])
         return {"jobs": []}
+
     monkeypatch.setattr(applybot, "fetch_json", fake_fetch)
     jobs, errors, status = applybot.search_jobicy_jobs("QA Automation Engineer", "India")
     assert jobs == []
     assert errors == []
+    assert seen_tags == ["qa", "automation", "sdet"]
     assert status[0]["source"] == "Jobicy"
     assert status[0]["configured"] is True
 
@@ -381,7 +384,7 @@ def test_normalize_indeed_job():
     assert jobs[0]["source"] == "Indeed RapidAPI"
     assert jobs[0]["url"] == "https://example.com/careers/qa-123"
     assert jobs[0]["source_url"].startswith("https://www.indeed.com/")
-    assert jobs[0]["salary_min"] is None  # USD is not treated as INR/LPA by default
+    assert jobs[0]["salary_min"] is None
     assert jobs[0]["work_mode"] == "Hybrid"
 
 
@@ -392,6 +395,7 @@ def test_indeed_provider_queries_pages_and_deduplicates(monkeypatch):
     monkeypatch.setattr(applybot, "INDEED_MAX_PAGES", 1)
 
     calls = []
+
     def fake_fetch(url, params, **kwargs):
         calls.append(params.copy())
         return {"jobs": [{
