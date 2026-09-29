@@ -1191,69 +1191,105 @@ def search_public_sources(query, location="", remote=False):
         filtered.append(job)
     return filtered, errors, source_status
 def import_job_items(items):
-    c = db(); created = []
+    """Persist a discovery batch efficiently without one SQL round-trip/savepoint per job."""
+    c = db()
+    created = []
     try:
         valid = []
         for j in items:
-            if not all(j.get(k) for k in ["title","company","url","description"]): continue
+            if not all(j.get(k) for k in ["title", "company", "url", "description"]):
+                continue
             ext = j.get("external_id") or job_fingerprint(j)
             smin, smax = j.get("salary_min"), j.get("salary_max")
-            if smin is None and smax is None: smin, smax = extract_salary(j["description"])
+            if smin is None and smax is None:
+                smin, smax = extract_salary(j["description"])
             exp = j.get("experience_min") if j.get("experience_min") is not None else extract_experience(j["description"])
-            base = {**j,"salary_min":smin,"salary_max":smax,"experience_min":exp}
-            try:
-                if AI_PROVIDER != "none":
-                    from ai_engine import extract_job_intelligence
-                    intel = extract_job_intelligence(base["title"],base["description"])
-                    if isinstance(intel,dict):
-                        if base.get("experience_min") is None and intel.get("experience_years") is not None: base["experience_min"]=float(intel["experience_years"])
-                        if base.get("salary_min") is None and intel.get("salary_min_lpa") is not None: base["salary_min"]=float(intel["salary_min_lpa"])
-                        if base.get("salary_max") is None and intel.get("salary_max_lpa") is not None: base["salary_max"]=float(intel["salary_max_lpa"])
-                        base["_ai_skills"]=intel.get("required_skills") or []
-            except Exception: pass
-            sc,reasons,matched=score_job(base)
-            ai_skills=base.get("_ai_skills") or []
-            if ai_skills:
-                matched=list(dict.fromkeys(matched+[str(x) for x in ai_skills if str(x).strip()])); reasons.append("AI extracted required skills")
-            valid.append((base,sc,reasons,matched))
+            base = {**j, "salary_min": smin, "salary_max": smax, "experience_min": exp}
 
-        ext_ids=[x[0].get("external_id") or job_fingerprint(x[0]) for x in valid]
-        existing_by_ext={}
-        if ext_ids:
-            if c.pg:
-                rows=c.execute("SELECT id,external_id FROM jobs WHERE external_id = ANY(?)",(ext_ids,)).fetchall()
-            else:
-                placeholders=",".join("?" for _ in ext_ids)
-                rows=c.execute(f"SELECT id,external_id FROM jobs WHERE external_id IN ({placeholders})",tuple(ext_ids)).fetchall()
-            existing_by_ext={r["external_id"]:r["id"] for r in rows}
+            # AI enrichment is deliberately not part of the synchronous discovery
+            # path. Provider results must be searchable even when an AI service is slow.
+            sc, reasons, matched = score_job(base)
+            valid.append((base, sc, reasons, matched))
 
-        for index,(j,sc,reasons,matched) in enumerate(valid):
-            ext=j.get("external_id") or job_fingerprint(j); smin,smax,exp=j.get("salary_min"),j.get("salary_max"),j.get("experience_min"); status="ready" if sc>0 else "skipped"
-            if ext in existing_by_ext:
-                job_id=existing_by_ext[ext]
-                c.execute("UPDATE jobs SET source=?,title=?,company=?,location=?,work_mode=?,salary_min=?,salary_max=?,experience_min=?,source_url=?,url=?,description=?,discovered_at=?,match_score=?,status=?,skip_reason=?,match_reasons=?,matched_skills=? WHERE id=?",(j.get("source","manual"),j["title"],j["company"],j.get("location",""),j.get("work_mode",""),smin,smax,exp,j.get("source_url",j["url"]),j["url"],j["description"],utcnow(),sc,status,"; ".join(reasons),"; ".join(reasons),json.dumps(matched),job_id)); duplicate=True
-            else:
-                savepoint=f"job_import_{index}"
-                try:
-                    savepoint=savepoint.strip(); c.execute(f"SAVEPOINT {savepoint}")
-                    params=(ext,j.get("source","manual"),j["title"],j["company"],j.get("location",""),j.get("work_mode",""),smin,smax,exp,j.get("source_url",j["url"]),j["url"],j["description"],utcnow(),sc,status,"; ".join(reasons),"; ".join(reasons),json.dumps(matched))
-                    if c.pg:
-                        inserted=c.execute("INSERT INTO jobs(external_id,source,title,company,location,work_mode,salary_min,salary_max,experience_min,source_url,url,description,discovered_at,match_score,status,skip_reason,match_reasons,matched_skills) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) RETURNING id",params).fetchone(); job_id=inserted["id"] if inserted else None
-                    else:
-                        cur=c.execute("INSERT INTO jobs(external_id,source,title,company,location,work_mode,salary_min,salary_max,experience_min,source_url,url,description,discovered_at,match_score,status,skip_reason,match_reasons,matched_skills) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",params); job_id=cur.lastrowid
-                    c.execute(f"RELEASE SAVEPOINT {savepoint}"); duplicate=False
-                except Exception as exc:
-                    c.execute(f"ROLLBACK TO SAVEPOINT {savepoint}"); c.execute(f"RELEASE SAVEPOINT {savepoint}")
-                    if "unique" in str(exc).lower() or "duplicate" in str(exc).lower():
-                        existing=c.execute("SELECT id FROM jobs WHERE external_id=?",(ext,)).fetchone()
-                        if existing: job_id=existing["id"]; duplicate=True
-                        else: raise
-                    else: raise
-            created.append({"job_id":job_id,"external_id":ext,"score":sc,"status":status,"matched_skills":matched,"reasons":reasons,"duplicate":duplicate,"experience_min":exp,"salary_min":smin,"salary_max":smax})
-        c.commit(); return created
+        if not valid:
+            return []
+
+        now = utcnow()
+        rows_to_write = []
+        for j, sc, reasons, matched in valid:
+            ext = j.get("external_id") or job_fingerprint(j)
+            status = "ready" if sc > 0 else "skipped"
+            rows_to_write.append((
+                ext, j.get("source", "manual"), j["title"], j["company"],
+                j.get("location", ""), j.get("work_mode", ""),
+                j.get("salary_min"), j.get("salary_max"), j.get("experience_min"),
+                j.get("source_url", j["url"]), j["url"], j["description"], now,
+                sc, status, "; ".join(reasons), "; ".join(reasons), json.dumps(matched),
+            ))
+
+        upsert_sql = """INSERT INTO jobs(
+            external_id,source,title,company,location,work_mode,salary_min,salary_max,
+            experience_min,source_url,url,description,discovered_at,match_score,status,
+            skip_reason,match_reasons,matched_skills
+        ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+        ON CONFLICT(external_id) DO UPDATE SET
+            source=excluded.source,
+            title=excluded.title,
+            company=excluded.company,
+            location=excluded.location,
+            work_mode=excluded.work_mode,
+            salary_min=excluded.salary_min,
+            salary_max=excluded.salary_max,
+            experience_min=excluded.experience_min,
+            source_url=excluded.source_url,
+            url=excluded.url,
+            description=excluded.description,
+            discovered_at=excluded.discovered_at,
+            match_score=excluded.match_score,
+            status=excluded.status,
+            skip_reason=excluded.skip_reason,
+            match_reasons=excluded.match_reasons,
+            matched_skills=excluded.matched_skills"""
+
+        if c.pg:
+            # execute_values collapses the whole discovery batch into one PostgreSQL
+            # statement, which is substantially faster than 143 individual SAVEPOINTs.
+            from psycopg2.extras import execute_values
+            cur = c.conn.cursor(cursor_factory=c.cursor_factory)
+            execute_values(cur, upsert_sql.replace("VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)", "VALUES %s"), rows_to_write, page_size=100)
+            cur.close()
+            ext_ids = [row[0] for row in rows_to_write]
+            rows = c.execute("SELECT id,external_id FROM jobs WHERE external_id = ANY(?)", (ext_ids,)).fetchall()
+            id_by_ext = {r["external_id"]: r["id"] for r in rows}
+        else:
+            c.conn.executemany(upsert_sql, rows_to_write)
+            ext_ids = [row[0] for row in rows_to_write]
+            placeholders = ",".join("?" for _ in ext_ids)
+            rows = c.execute(f"SELECT id,external_id FROM jobs WHERE external_id IN ({placeholders})", tuple(ext_ids)).fetchall()
+            id_by_ext = {r["external_id"]: r["id"] for r in rows}
+
+        c.commit()
+
+        for j, sc, reasons, matched in valid:
+            ext = j.get("external_id") or job_fingerprint(j)
+            created.append({
+                "job_id": id_by_ext.get(ext),
+                "external_id": ext,
+                "score": sc,
+                "status": "ready" if sc > 0 else "skipped",
+                "matched_skills": matched,
+                "reasons": reasons,
+                "duplicate": ext in id_by_ext,
+                "experience_min": j.get("experience_min"),
+                "salary_min": j.get("salary_min"),
+                "salary_max": j.get("salary_max"),
+            })
+        return created
     except Exception:
-        c.conn.rollback(); raise
-    finally: c.close()
+        c.conn.rollback()
+        raise
+    finally:
+        c.close()
 
 
 @app.get("/")
@@ -1280,25 +1316,63 @@ def search_links():
 
 
 def run_discovery(body):
-    query=str(body.get("query") or "QA Automation Engineer").strip(); location=str(body.get("location") or "India").strip(); remote=bool(body.get("remote",False)); threshold=float(body.get("threshold",70)); max_experience=float(body.get("max_experience",2)); min_salary=max(float(body.get("min_salary",3)),CANDIDATE["minimum_ctc_lpa"])
-    items,errors,source_status=search_public_sources(query,location,remote)
-    try: results=import_job_items(items)
-    except Exception as exc: errors.append({"source":"database","error":str(exc)[:1500]}); results=[]
-    qualified=[]
+    query = str(body.get("query") or "QA Automation Engineer").strip()
+    location = str(body.get("location") or "India").strip()
+    remote = bool(body.get("remote", False))
+    threshold = float(body.get("threshold", 70))
+    max_experience = float(body.get("max_experience", 2))
+    min_salary = max(float(body.get("min_salary", 3)), CANDIDATE["minimum_ctc_lpa"])
+
+    items, errors, source_status = search_public_sources(query, location, remote)
+    try:
+        results = import_job_items(items)
+    except Exception as exc:
+        # Discovery should not crash the HTTP request. Return the provider data
+        # and a precise persistence error so the UI can still diagnose it.
+        errors.append({"source": "database", "error": str(exc)[:1500]})
+        results = []
+
+    qualified = []
     for r in results:
-        exp_value=r.get("experience_min"); salary_value=r.get("salary_max")
+        exp_value = r.get("experience_min")
+        salary_value = r.get("salary_max")
         try:
-            c=db()
-            row=c.execute("SELECT experience_min,salary_max FROM jobs WHERE id=?",(r.get("job_id"),)).fetchone()
-            if row: exp_value,salary_value=row["experience_min"],row["salary_max"]
+            c = db()
+            row = c.execute("SELECT experience_min,salary_max FROM jobs WHERE id=?", (r.get("job_id"),)).fetchone()
             c.close()
+            if row:
+                exp_value, salary_value = row["experience_min"], row["salary_max"]
         except Exception as exc:
-            errors.append({"source":"database","error":"Qualification lookup failed: "+str(exc)[:1000]})
-        exp_ok=exp_value is None or float(exp_value)<=max_experience; salary_ok=salary_value is None or float(salary_value)>=min_salary; threshold_ok=float(r.get("score") or 0)>=threshold
-        r["qualified"]=bool(threshold_ok and exp_ok and salary_ok)
-        r["qualification_reason"]="Qualified" if r["qualified"] else ("Below match threshold" if not threshold_ok else ("Experience exceeds limit" if not exp_ok else "Published salary is below minimum"))
-        if r["qualified"]: qualified.append(r)
-    return {"mode":"in_app","query":query,"location":location,"remote":remote,"threshold":threshold,"max_experience":max_experience,"min_salary":min_salary,"sources_checked":source_status,"provider_summary":{str(x.get("source")):int(x.get("found") or 0) for x in source_status},"items_seen":len(items),"new_jobs":len(results),"qualified_jobs":len(qualified),"errors":errors,"results":results}
+            errors.append({"source": "database", "error": "Qualification lookup failed: " + str(exc)[:1000]})
+
+        exp_ok = exp_value is None or float(exp_value) <= max_experience
+        salary_ok = salary_value is None or float(salary_value) >= min_salary
+        threshold_ok = float(r.get("score") or 0) >= threshold
+        r["qualified"] = bool(threshold_ok and exp_ok and salary_ok)
+        r["qualification_reason"] = (
+            "Qualified" if r["qualified"] else
+            ("Below match threshold" if not threshold_ok else
+             ("Experience exceeds limit" if not exp_ok else "Published salary is below minimum"))
+        )
+        if r["qualified"]:
+            qualified.append(r)
+
+    return {
+        "mode": "in_app",
+        "query": query,
+        "location": location,
+        "remote": remote,
+        "threshold": threshold,
+        "max_experience": max_experience,
+        "min_salary": min_salary,
+        "sources_checked": source_status,
+        "provider_summary": {str(x.get("source")): int(x.get("found") or 0) for x in source_status},
+        "items_seen": len(items),
+        "new_jobs": len(results),
+        "qualified_jobs": len(qualified),
+        "errors": errors,
+        "results": results,
+    }
 
 
 @app.post("/api/discover/search")
