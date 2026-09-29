@@ -57,6 +57,7 @@ new = '''        base = {**j, "salary_min": smin, "salary_max": smax, "experienc
                     base["_ai_skills"] = ai_skills
         except Exception:
             pass
+        smin, smax, exp = base.get("salary_min"), base.get("salary_max"), base.get("experience_min")
         sc, reasons, matched = score_job(base)
         ai_skills = base.get("_ai_skills") or []
         if ai_skills:
