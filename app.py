@@ -38,6 +38,20 @@ JOBICY_API_URL = os.getenv("JOBICY_API_URL", "https://jobicy.com/api/v2/remote-j
 JOBICY_API_KEY = os.getenv("JOBICY_API_KEY", "").strip()
 JOBICY_COUNT = min(200, max(1, int(os.getenv("JOBICY_COUNT", "200"))))
 JOBICY_TIMEOUT = max(10, int(os.getenv("JOBICY_TIMEOUT", "30")))
+
+# Indeed RapidAPI provider. Keep the key server-side; never expose it to the browser.
+INDEED_RAPIDAPI_KEY = os.getenv("INDEED_RAPIDAPI_KEY", "").strip()
+INDEED_RAPIDAPI_HOST = os.getenv("INDEED_RAPIDAPI_HOST", "indeed-jobs-api.p.rapidapi.com").strip()
+INDEED_RAPIDAPI_URL = os.getenv("INDEED_RAPIDAPI_URL", "https://indeed-jobs-api.p.rapidapi.com").strip().rstrip("/")
+INDEED_RAPIDAPI_ENABLED = os.getenv("INDEED_RAPIDAPI_ENABLED", "true").lower() == "true"
+INDEED_MAX_PAGES = min(5, max(1, int(os.getenv("INDEED_MAX_PAGES", "2"))))
+INDEED_MAX_QUERIES = min(5, max(1, int(os.getenv("INDEED_MAX_QUERIES", "3"))))
+INDEED_DATE_POSTED = os.getenv("INDEED_DATE_POSTED", "").strip()
+# The provider documents salaryMin/salaryMax as USD. Leave conversion disabled by
+# default so USD values can never be mistaken for INR/LPA. Set a trusted rate in
+# Render and enable it if you want salary-based qualification for Indeed results.
+INDEED_CONVERT_USD_SALARY = os.getenv("INDEED_CONVERT_USD_SALARY", "false").lower() == "true"
+INDEED_USD_TO_INR = float(os.getenv("INDEED_USD_TO_INR", "0") or 0)
 ENABLE_LEGACY_SOURCES = os.getenv("ENABLE_LEGACY_SOURCES", "false").lower() == "true"
 GREENHOUSE_BOARDS = [x.strip() for x in os.getenv("GREENHOUSE_BOARDS", "").split(",") if x.strip()]
 LEVER_COMPANIES = [x.strip() for x in os.getenv("LEVER_COMPANIES", "").split(",") if x.strip()]
@@ -476,6 +490,152 @@ def normalize_linkedin_jobs(data):
     return jobs
 
 
+def _indeed_salary_to_lpa(salary, salary_type=""):
+    """Convert documented Indeed USD salary values to INR LPA only when explicitly enabled."""
+    if not INDEED_CONVERT_USD_SALARY or not INDEED_USD_TO_INR or salary is None:
+        return None
+    try:
+        value = float(salary)
+    except (TypeError, ValueError):
+        return None
+    if str(salary_type).upper() == "HOURLY":
+        value *= 2080
+    return (value * INDEED_USD_TO_INR) / 100000
+
+
+def _indeed_country(location):
+    value = (location or "").strip().lower()
+    if not value:
+        return "IN"
+    mapping = {
+        "india": "IN", "ind": "IN", "indore": "IN", "bangalore": "IN", "bengaluru": "IN",
+        "pune": "IN", "hyderabad": "IN", "mumbai": "IN", "delhi": "IN", "noida": "IN",
+        "gurgaon": "IN", "gurugram": "IN", "chennai": "IN", "remote": "IN",
+        "usa": "US", "united states": "US", "us": "US", "uk": "GB", "united kingdom": "GB",
+        "canada": "CA", "australia": "AU", "germany": "DE", "france": "FR",
+        "singapore": "SG", "uae": "AE",
+    }
+    for key, country in mapping.items():
+        if key in value:
+            return country
+    return "IN"
+
+
+def _indeed_search_queries(query):
+    requested = (query or "").strip()
+    candidates = [requested]
+    q = requested.lower()
+    if any(x in q for x in ("qa", "quality", "tester", "testing", "test", "automation", "sdet")):
+        related = ["QA Automation Engineer", "Automation Tester", "SDET"]
+    else:
+        related = list(CANDIDATE["roles_primary"][:3])
+    existing = {x.lower() for x in candidates}
+    for item in related:
+        if item.lower() not in existing:
+            candidates.append(item)
+            existing.add(item.lower())
+        if len(candidates) >= INDEED_MAX_QUERIES:
+            break
+    return [x for x in candidates if x][:INDEED_MAX_QUERIES]
+
+
+def normalize_indeed_jobs(data):
+    rows = data.get("jobs", []) if isinstance(data, dict) else []
+    jobs = []
+    for raw in rows:
+        if not isinstance(raw, dict):
+            continue
+        title = str(raw.get("title") or "").strip()
+        company = str(raw.get("company") or "Unknown").strip()
+        location = str(raw.get("location") or "").strip()
+        job_key = str(raw.get("jobKey") or "").strip()
+        apply_url = str(raw.get("applyUrl") or "").strip()
+        employer_url = str(raw.get("thirdPartyApplyUrl") or "").strip()
+        url = employer_url or apply_url
+        if not title or not company or not url or not job_key:
+            continue
+        description = strip_html(str(raw.get("snippet") or ""))
+        remote_label = str(raw.get("remote") or "").strip()
+        remote_text = (remote_label + " " + title + " " + description).lower()
+        work_mode = "Remote" if "remote" in remote_text else ("Hybrid" if "hybrid" in remote_text else "")
+        salary = raw.get("salary") if isinstance(raw.get("salary"), dict) else {}
+        salary_type = str(salary.get("type") or "")
+        salary_min = _indeed_salary_to_lpa(salary.get("min"), salary_type)
+        salary_max = _indeed_salary_to_lpa(salary.get("max"), salary_type)
+        salary_text = str(salary.get("text") or "").strip()
+        exp = extract_experience(description)
+        jobs.append({
+            "external_id": "indeed:" + job_key,
+            "source": "Indeed RapidAPI",
+            "source_url": apply_url or url,
+            "title": title,
+            "company": company,
+            "location": location,
+            "work_mode": work_mode,
+            "salary_min": salary_min,
+            "salary_max": salary_max,
+            "salary_text": salary_text,
+            "salary_currency": "USD" if salary_text and not INDEED_CONVERT_USD_SALARY else ("INR" if salary_min is not None else ""),
+            "experience_min": exp,
+            "url": url,
+            "description": description or title,
+            "application_url": employer_url,
+            "posted_at": str(raw.get("postedAt") or "").strip(),
+            "employment_type": ", ".join(str(x) for x in (raw.get("jobTypes") or [])),
+            "indeed_apply_enabled": bool(raw.get("indeedApplyEnabled")),
+            "is_sponsored": bool(raw.get("isSponsored")),
+            "is_urgently_hiring": bool(raw.get("isUrgentlyHiring")),
+        })
+    return jobs
+
+
+def search_indeed_jobs(query, location="", remote=False):
+    if not INDEED_RAPIDAPI_ENABLED:
+        return [], [], [_provider_status("Indeed", 0, False, "Indeed RapidAPI — disabled")]
+    if not INDEED_RAPIDAPI_KEY:
+        return [], [], [_provider_status("Indeed", 0, False, "Indeed RapidAPI — API key required")]
+    country = _indeed_country(location)
+    queries = _indeed_search_queries(query)
+    headers = {"X-RapidAPI-Key": INDEED_RAPIDAPI_KEY, "X-RapidAPI-Host": INDEED_RAPIDAPI_HOST}
+    results, errors = [], []
+    successful_requests = 0
+    pages_checked = 0
+    for search_query in queries:
+        for page in range(1, INDEED_MAX_PAGES + 1):
+            params = {"query": search_query, "location": "Remote" if remote else (location or "India"), "country": country, "page": page, "sort": "date"}
+            if remote:
+                params["remoteOnly"] = "true"
+            if INDEED_DATE_POSTED:
+                try:
+                    params["datePosted"] = int(INDEED_DATE_POSTED)
+                except ValueError:
+                    pass
+            try:
+                data = fetch_json(INDEED_RAPIDAPI_URL + "/jobs", params, headers=headers, timeout=JOBICY_TIMEOUT)
+                successful_requests += 1
+                pages_checked += 1
+                rows = normalize_indeed_jobs(data)
+                for job in rows:
+                    job["_query"] = search_query
+                    if location_matches(job, location, remote):
+                        results.append(job)
+                if len(rows) < 15:
+                    break
+            except Exception as exc:
+                errors.append({"source": "Indeed", "error": f"query={search_query!r}, page={page}: {str(exc)[:900]}"})
+                break
+    unique, seen = [], set()
+    for job in results:
+        key = job.get("external_id") or job_fingerprint(job)
+        if key in seen:
+            continue
+        seen.add(key)
+        unique.append(job)
+    status = _provider_status("Indeed", len(unique), True, "Indeed Jobs API via RapidAPI", None if successful_requests else (errors[0]["error"] if errors else "No successful requests"))
+    status.update({"raw_found": len(unique), "queries": queries, "pages_checked": pages_checked, "country": country, "max_pages": INDEED_MAX_PAGES, "direct_application_urls": any(bool(j.get("application_url")) for j in unique)})
+    return unique, errors, [status]
+
+
 def normalize_jobicy_jobs(data):
     jobs = []
     rows = data.get("jobs", []) if isinstance(data, dict) else []
@@ -674,6 +834,11 @@ def _provider_status(source, found, configured, provider, error=None):
 def search_additional_providers(query, location="", remote=False):
     results, errors, status = [], [], []
 
+    indeed_results, indeed_errors, indeed_status = search_indeed_jobs(query, location, remote)
+    results.extend(indeed_results)
+    errors.extend(indeed_errors)
+    status.extend(indeed_status)
+
     if JOBVETTA_API_KEY and (
         not location or "india" in location.lower() or
         location.lower() in {"ind", "bengaluru", "bangalore", "pune", "mumbai", "hyderabad", "indore", "delhi", "noida", "gurgaon", "gurugram"}
@@ -795,43 +960,39 @@ def search_jobicy_jobs(query, location="", remote=False):
     headers = {}
     if JOBICY_API_KEY:
         headers["Authorization"] = f"Bearer {JOBICY_API_KEY}"
-    try:
-        data = fetch_json(JOBICY_API_URL, base_params, headers=headers, timeout=JOBICY_TIMEOUT)
-        rows = normalize_jobicy_jobs(data)
-        if not rows:
-            fallback_params = {"count": JOBICY_COUNT}
-            if geo:
-                fallback_params["geo"] = geo
-            data = fetch_json(JOBICY_API_URL, fallback_params, headers=headers, timeout=JOBICY_TIMEOUT)
-            rows = normalize_jobicy_jobs(data)
-        filtered = []
-        for job in rows:
-            job["_query"] = query
-            if location_matches(job, location_text, remote):
-                filtered.append(job)
-        if not filtered:
-            fallback_params = {"count": JOBICY_COUNT}
-            data = fetch_json(JOBICY_API_URL, fallback_params, headers=headers, timeout=JOBICY_TIMEOUT)
-            fallback_rows = normalize_jobicy_jobs(data)
-            for job in fallback_rows:
-                job["_query"] = query
-                if location_matches(job, location_text, remote):
-                    filtered.append(job)
-            rows = fallback_rows
-        return filtered, [], [{
-            "source": "Jobicy", "found": len(filtered), "raw_found": len(rows),
-            "configured": True,
-            "provider": "Jobicy Commercial API" if JOBICY_API_KEY else "Jobicy Public REST API",
-            "direct_application_urls": bool(JOBICY_API_KEY), "tag": tag,
-            "geo": geo or "anywhere"
-        }]
-    except Exception as exc:
-        return [], [{"source": "Jobicy", "error": str(exc)[:1000]}], [{
-            "source": "Jobicy", "found": 0, "raw_found": 0, "configured": True,
-            "provider": "Jobicy Commercial API" if JOBICY_API_KEY else "Jobicy Public REST API",
-            "direct_application_urls": bool(JOBICY_API_KEY), "tag": tag,
-            "geo": geo or "anywhere"
-        }]
+    attempts = []
+    if geo:
+        attempts.append(("tag+geo", {"count": JOBICY_COUNT, "tag": tag, "geo": geo}))
+    attempts.append(("tag", {"count": JOBICY_COUNT, "tag": tag}))
+    if geo:
+        attempts.append(("geo", {"count": JOBICY_COUNT, "geo": geo}))
+    attempts.append(("global", {"count": JOBICY_COUNT}))
+    rows, errors, successful_mode = [], [], None
+    for mode, params in attempts:
+        try:
+            data = fetch_json(JOBICY_API_URL, params, headers=headers, timeout=JOBICY_TIMEOUT)
+            candidate_rows = normalize_jobicy_jobs(data)
+            rows = candidate_rows
+            successful_mode = mode
+            if candidate_rows or mode == "global":
+                break
+        except Exception as exc:
+            errors.append(f"{mode}: {str(exc)[:500]}")
+            continue
+    filtered = []
+    for job in rows:
+        job["_query"] = query
+        if location_matches(job, location_text, remote):
+            filtered.append(job)
+    provider = {
+        "source": "Jobicy", "found": len(filtered), "raw_found": len(rows), "configured": True,
+        "provider": "Jobicy Commercial API" if JOBICY_API_KEY else "Jobicy Public REST API",
+        "direct_application_urls": bool(JOBICY_API_KEY), "tag": tag,
+        "geo": geo or "anywhere", "request_mode": successful_mode or "failed"
+    }
+    if errors:
+        provider["fallback_notes"] = errors[:4]
+    return filtered, ([{"source": "Jobicy", "error": "; ".join(errors[:3])}] if errors and not rows else []), [provider]
 
 
 
