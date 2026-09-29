@@ -404,3 +404,24 @@ def test_jobicy_geo_400_falls_back_to_tag(monkeypatch):
     assert status[0]["request_mode"] == "tag"
     assert any("geo" in call for call in calls)
     assert any("tag" in call and "geo" not in call for call in calls)
+
+
+def test_indeed_403_is_reported_as_configuration_error(monkeypatch):
+    monkeypatch.setattr(applybot, "INDEED_RAPIDAPI_ENABLED", True)
+    monkeypatch.setattr(applybot, "INDEED_RAPIDAPI_KEY", "test-key")
+    monkeypatch.setattr(applybot, "INDEED_MAX_QUERIES", 3)
+    monkeypatch.setattr(applybot, "INDEED_MAX_PAGES", 2)
+
+    def fake_fetch(url, params=None, headers=None, **kwargs):
+        assert headers["X-RapidAPI-Key"] == "test-key"
+        assert headers["X-RapidAPI-Host"] == applybot.INDEED_RAPIDAPI_HOST
+        raise RuntimeError("GET https://indeed-jobs-api.p.rapidapi.com/jobs failed after 1 attempt(s) HTTP 403: Forbidden")
+
+    monkeypatch.setattr(applybot, "fetch_json", fake_fetch)
+    jobs, errors, status = applybot.search_indeed_jobs("QA Automation Engineer", "India")
+    assert jobs == []
+    assert status[0]["source"] == "Indeed"
+    assert status[0]["configured"] is False
+    assert status[0]["authorization_ok"] is False
+    assert errors[0]["kind"] == "authorization"
+    assert len(errors) == 1
