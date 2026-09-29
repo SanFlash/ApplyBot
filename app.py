@@ -263,92 +263,86 @@ def extract_experience(text):
 
 
 def score_job(j):
-    text = ((j.get("title") or "") + " " + (j.get("description") or "")).lower()
-    title = (j.get("title") or "").lower()
-    score = 0
+    """Score jobs from evidence actually published by the source."""
+    title = str(j.get("title") or "").strip().lower()
+    location = str(j.get("location") or "").strip().lower()
+    mode = str(j.get("work_mode") or "").strip().lower()
+    description = str(j.get("description") or "").lower()
+    department = str(j.get("department") or "").lower()
+    requested = str(j.get("_query") or "").strip().lower()
+
+    if not title:
+        return 0, ["Missing job title"], []
+
     reasons, matched = [], []
-    role_hit = False
-
-    requested = (j.get("_query") or "").strip().lower()
-    requested_tokens = tokens(requested)
-    title_tokens = tokens(title)
-    query_overlap = len(requested_tokens & title_tokens) if requested_tokens else 0
-
+    score = 0
+    role_hit = None
     for role, keywords in ROLE_KEYWORDS.items():
         if any(k in title for k in keywords):
-            role_hit = True
-            score += 36 if role in CANDIDATE["roles_primary"] else 18
-            reasons.append(f"Role matches {role}")
+            role_hit = role
             break
 
-    if not role_hit and requested_tokens:
-        overlap_ratio = query_overlap / max(1, len(requested_tokens))
-        role_words = {"qa", "quality", "assurance", "automation", "automated", "tester", "testing", "test", "sdet", "software"}
-        title_role_overlap = len(title_tokens & role_words)
-        if overlap_ratio >= 0.5 and title_role_overlap >= 2:
-            role_hit = True
-            score += 30
-            reasons.append("Title closely matches requested role")
+    query_tokens = tokens(requested)
+    title_tokens = tokens(title)
+    query_overlap = len(query_tokens & title_tokens) / max(1, len(query_tokens))
+    role_words = {"qa", "quality", "assurance", "automation", "tester", "testing", "test", "sdet"}
 
-    if not role_hit:
-        return 0, ["Role does not match configured targets"], []
-
-    exp = j.get("experience_min")
-    if exp is not None:
-        if exp <= CANDIDATE["experience_years"] + 1:
-            score += 20
-            reasons.append("Experience requirement is within configured range")
-        else:
-            return 0, [f"Experience requirement {exp:g}+ years exceeds limit"], []
-
-    loc = (j.get("location") or "").lower()
-    mode = (j.get("work_mode") or "").lower()
-    # A remote job marked "Anywhere"/"Worldwide" is valid for an India search:
-    # the employer is not requiring an out-of-preference physical location.
-    remote_anywhere = (
-        "remote" in mode
-        and any(term in loc for term in ("anywhere", "worldwide", "global", "remote", "apac", "asia"))
-    )
-    loc_ok = (
-        any(x.lower() in loc for x in CANDIDATE["locations"] if x.lower() not in {"india", "remote"})
-        or "remote" in loc
-        or "india" in loc
-        or not loc
-        or remote_anywhere
-    )
-    if not loc_ok:
-        return 0, ["Location is outside preferences"], []
-
-    score += 15
-    reasons.append("Location matches preferences")
-
-    if not mode or "hybrid" in mode or "remote" in mode:
-        score += 8
-
-    smax = j.get("salary_max")
-    if smax is not None and smax < CANDIDATE["minimum_ctc_lpa"]:
-        return 0, ["Salary is below minimum threshold"], []
-    if smax is not None:
-        score += 15 if smax >= CANDIDATE["expected_ctc_min_lpa"] else 8
-        reasons.append("Salary meets minimum threshold")
+    if role_hit:
+        score += 55 if role_hit in CANDIDATE["roles_primary"] else 42
+        reasons.append(f"Role matches {role_hit}")
+    elif query_overlap >= 0.5 and len(title_tokens & role_words) >= 1:
+        score += 42
+        reasons.append("Title closely matches requested role")
     else:
-        score += 3
-        reasons.append("Salary not disclosed; needs verification")
+        return 0, ["Role does not match the configured QA/automation targets"], []
 
-    normalized_text = re.sub(r"[^a-z0-9+#.\-/ ]+", " ", text)
-    normalized_text = re.sub(r"\s+", " ", normalized_text).lower()
+    compatible_locations = (
+        "india", "bengaluru", "bangalore", "pune", "hyderabad", "delhi",
+        "gurugram", "gurgaon", "noida", "mumbai", "indore", "chennai",
+        "kolkata", "remote", "anywhere", "worldwide", "global", "apac", "asia"
+    )
+    if any(term in location for term in compatible_locations) or not location:
+        score += 18
+        reasons.append("Location is compatible with the selected search")
+    else:
+        return 0, ["Location is outside the selected preferences"], []
+
+    if "remote" in mode or "remote" in location:
+        score += 5
+        reasons.append("Remote work is available")
+    elif "hybrid" in mode or "hybrid" in location:
+        score += 4
+        reasons.append("Hybrid work is available")
+
+    evidence = " ".join((title, department, description))
     for skill in CANDIDATE["skills"]:
         sk = skill.lower()
         variants = {sk, sk.replace(" ", "-"), sk.replace(" ", "/")}
-        if any(v in normalized_text for v in variants):
+        if any(v in evidence for v in variants):
             matched.append(skill)
-
-    skill_points = min(12, len(matched) * 2)
-    score += skill_points
     if matched:
-        reasons.append("Matched skills: " + ", ".join(matched[:6]))
+        score += min(17, len(matched) * 3)
+        reasons.append("Matched skills: " + ", ".join(matched[:7]))
     else:
-        reasons.append("No configured skills detected")
+        reasons.append("No skill evidence published by the source")
+
+    exp = j.get("experience_min")
+    if exp is not None:
+        if float(exp) <= CANDIDATE["experience_years"] + 1:
+            score += 5
+            reasons.append("Published experience requirement is within target")
+        else:
+            return 0, [f"Experience requirement {float(exp):g}+ years exceeds target"], matched
+
+    smax = j.get("salary_max")
+    if smax is not None:
+        if float(smax) < CANDIDATE["minimum_ctc_lpa"]:
+            return 0, ["Published salary is below the configured minimum"], matched
+        score += 5
+        reasons.append("Published salary meets the configured minimum")
+    else:
+        reasons.append("Salary not disclosed; kept neutral")
+
     return min(100, score), reasons, matched
 
 
@@ -497,8 +491,7 @@ def normalize_linkedin_jobs(data):
             "source_url": linkedin_url,
             "title": title, "company": company, "location": location, "work_mode": work_mode,
             "salary_min": smin, "salary_max": smax, "experience_min": exp,
-            "url": usable_apply or linkedin_url, "description": description or title,
-            "application_url": usable_apply,
+            "url": usable_apply or linkedin_url, "description": description or title,            "application_url": usable_apply,
             "application_type": str(_first_value(raw, "applyType", "applicationType")).strip(),
             "posted_at": str(_first_value(raw, "postedAt", "postedDate", "publishedAt", "posted_date")).strip(),
             "employment_type": str(_first_value(raw, "employmentType", "contractType", "job_type")).strip(),
@@ -997,8 +990,7 @@ def _jobicy_search_tags(query):
 
 
 def job_matches_query(job, query):
-    """Require actual query/role relevance before a listing enters ApplyBot results."""
-    q = (query or "").strip().lower()
+    """Require actual query/role relevance before a listing enters ApplyBot results."""    q = (query or "").strip().lower()
     if not q:
         return True
     title = (job.get("title") or "").lower()
@@ -1471,82 +1463,24 @@ def discovery_diagnostics():
 
 @app.get("/api/provider-check")
 def provider_check():
-    """Live smoke test for the active discovery stack and database."""
+    """Small smoke test for the only active discovery dependency."""
     result = {
         "service": "ApplyBot",
-        "strategy": "Free ATS dataset first + direct public ATS feeds + public fallbacks (no paid API required)",
+        "strategy": "Free ATS dataset → local matching → supported employer application",
         "database": "postgres" if is_postgres() else "sqlite",
     }
-
     try:
         from providers_v4 import _fetch_dataset
-        free_jobs, _ = _fetch_dataset()
-        result["free_ats_dataset"] = {
-            "ok": bool(free_jobs),
-            "count": len(free_jobs),
+        jobs, _ = _fetch_dataset()
+        result["source"] = {
+            "name": "Open Jobs Data",
             "provider": "ConorsCode/open-jobs-data",
+            "ok": bool(jobs),
+            "count": len(jobs),
             "endpoint": "https://raw.githubusercontent.com/ConorsCode/open-jobs-data/main/data/jobs.json",
         }
     except Exception as exc:
-        result["free_ats_dataset"] = {"ok": False, "error": str(exc)[:1000]}
-
-    try:
-        if BRAVE_SEARCH_API_KEY and BRAVE_SEARCH_ENABLED:
-            from providers_v3 import _brave_search, _brave_results
-            data = _brave_search(None, "QA Automation Engineer India jobs careers apply", "India")
-            result["career_web_search"] = {
-                "ok": bool(_brave_results(data)),
-                "count": len(_brave_results(data)),
-                "sample_urls": [x.get("url") for x in _brave_results(data)[:5]],
-                "provider": "Brave Search API",
-            }
-        else:
-            result["career_web_search"] = {"ok": False, "configured": False}
-    except Exception as exc:
-        result["career_web_search"] = {"ok": False, "error": str(exc)[:1000]}
-
-    try:
-        data = fetch_json(JOBICY_API_URL, {"count": 5, "tag": "qa"}, timeout=JOBICY_TIMEOUT)
-        jobs = normalize_jobicy_jobs(data)
-        result["jobicy"] = {
-            "ok": bool(jobs),
-            "count": len(jobs),
-            "sample_titles": [j["title"] for j in jobs[:5]],
-            "endpoint": JOBICY_API_URL,
-        }
-    except Exception as exc:
-        result["jobicy"] = {"ok": False, "error": str(exc)[:1000]}
-
-    try:
-        data = fetch_json(
-            "https://www.themuse.com/api/public/jobs",
-            {"page": 0, "location": "India", "category": "Software Engineering", "descending": "true"},
-            timeout=JOBICY_TIMEOUT,
-        )
-        jobs = normalize_muse_jobs(data)
-        result["muse"] = {
-            "ok": bool(jobs),
-            "count": len(jobs),
-            "sample_titles": [j["title"] for j in jobs[:5]],
-            "endpoint": "https://www.themuse.com/api/public/jobs",
-        }
-    except Exception as exc:
-        result["muse"] = {"ok": False, "error": str(exc)[:1000]}
-
-    try:
-        if REMOTEOK_ENABLED:
-            jobs = normalize_remoteok_jobs(fetch_json("https://remoteok.com/api", timeout=JOBICY_TIMEOUT))
-            result["remoteok"] = {
-                "ok": bool(jobs),
-                "count": len(jobs),
-                "sample_titles": [j["title"] for j in jobs[:5]],
-                "endpoint": "https://remoteok.com/api",
-            }
-        else:
-            result["remoteok"] = {"ok": False, "configured": False}
-    except Exception as exc:
-        result["remoteok"] = {"ok": False, "error": str(exc)[:1000]}
-
+        result["source"] = {"name": "Open Jobs Data", "ok": False, "error": str(exc)[:1000]}
     try:
         c = db()
         if c.pg:
@@ -1560,59 +1494,27 @@ def provider_check():
         result["database_schema"] = {"ok": required.issubset(columns), "missing": sorted(required - columns)}
     except Exception as exc:
         result["database_schema"] = {"ok": False, "error": str(exc)[:1000]}
-
-    result["ok"] = bool(
-        result.get("free_ats_dataset", {}).get("ok")
-        or result.get("career_web_search", {}).get("ok")
-        or result.get("jobicy", {}).get("ok")
-        or result.get("muse", {}).get("ok")
-        or result.get("remoteok", {}).get("ok")
-    ) and bool(result.get("database_schema", {}).get("ok"))
+    result["ok"] = bool(result["source"].get("ok")) and bool(result["database_schema"].get("ok"))
     return jsonify(result), (200 if result["ok"] else 503)
+
 
 @app.get("/api/config")
 def config_status():
     return jsonify({
         "auto_apply_enabled": AUTO_APPLY_ENABLED,
         "auto_apply_max": AUTO_APPLY_MAX,
-        "ai": {
-            "provider": AI_PROVIDER,
-            "configured": bool((AI_PROVIDER == "gemini" and GEMINI_API_KEY) or AI_PROVIDER == "ollama" or AI_PROVIDER == "none"),
-            "model": GEMINI_MODEL if AI_PROVIDER == "gemini" else os.getenv("OLLAMA_MODEL", "gemma3"),
-        },
-        "ai": {
-            "provider": AI_PROVIDER,
-            "configured": bool((AI_PROVIDER == "gemini" and GEMINI_API_KEY) or AI_PROVIDER == "ollama" or AI_PROVIDER == "none"),
-            "model": GEMINI_MODEL if AI_PROVIDER == "gemini" else os.getenv("OLLAMA_MODEL", "gemma3"),
-        },
         "candidate_email_configured": bool(CANDIDATE_EMAIL),
         "candidate_phone_configured": bool(CANDIDATE_PHONE),
         "resume_configured": resume_file_path().is_file(),
         "supported_browser_adapters": ["greenhouse", "lever", "workable", "ashby", "smartrecruiters"],
-        "discovery_sources": {
-            "CareerWebSearch": bool(BRAVE_SEARCH_API_KEY) and BRAVE_SEARCH_ENABLED,
-            "CareerWebSearch_provider": "Brave Search API + JobPosting JSON-LD" if BRAVE_SEARCH_API_KEY and BRAVE_SEARCH_ENABLED else "API key required",
-            "Ashby": len(ASHBY_BOARDS),
-            "Jobicy": True,
-            "Jobicy_provider": "Jobicy Commercial API" if JOBICY_API_KEY else "Jobicy Public REST API",
-            "Jobicy_direct_application_urls": bool(JOBICY_API_KEY),
-            "Jobvetta": bool(JOBVETTA_API_KEY),
-            "IndianAPI": bool(INDIANAPI_KEY),
-            "RemoteOK": REMOTEOK_ENABLED,
-            "TheMuse": True,
-            "TheMuse_provider": "The Muse public Jobs API",
-            "RemoteOK": REMOTEOK_ENABLED,
-            "LinkedIn": False,
-            "Indeed": False,
-            "Indeed_provider": "Disabled as a core dependency; use configured employer ATS/public providers instead",
-            "legacy_sources_enabled": ENABLE_LEGACY_SOURCES,
-            "Adzuna": bool(ADZUNA_APP_ID and ADZUNA_APP_KEY),
-            "Greenhouse": len(GREENHOUSE_BOARDS),
-            "Lever": len(LEVER_COMPANIES),
-            "Remotive": False,
-            "Arbeitnow": False,
+        "discovery": {
+            "provider": "ConorsCode/open-jobs-data",
+            "free": True,
+            "api_key_required": False,
+            "rss_used": False,
+            "aggregator_redirects_used": False,
         },
-        "note": "Discovery uses live APIs where configured. Automatic submission is limited to supported employer ATS forms."
+        "note": "Discovery is free and in-app. Submission stops for CAPTCHA, login, missing required answers, or unsupported forms."
     })
 
 
