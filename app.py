@@ -30,6 +30,9 @@ INDIANAPI_KEY = os.getenv("INDIANAPI_KEY", "").strip()
 INDIANAPI_URL = os.getenv("INDIANAPI_URL", "https://jobs.indianapi.in/jobs").strip()
 THEMUSE_API_KEY = os.getenv("THEMUSE_API_KEY", "").strip()
 THEMUSE_ENABLED = os.getenv("THEMUSE_ENABLED", "false").lower() == "true"
+AI_PROVIDER = os.getenv("AI_PROVIDER", "none").strip().lower()
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "").strip()
+GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-2.5-flash-lite").strip()
 REMOTEOK_ENABLED = os.getenv("REMOTEOK_ENABLED", "true").lower() == "true"
 JOBICY_API_URL = os.getenv("JOBICY_API_URL", "https://jobicy.com/api/v2/remote-jobs").strip()
 JOBICY_API_KEY = os.getenv("JOBICY_API_KEY", "").strip()
@@ -304,13 +307,20 @@ def score_job(j):
         score += 3
         reasons.append("Salary not disclosed; needs verification")
 
-    jt = tokens(text)
+    normalized_text = re.sub(r"[^a-z0-9+#.\-/ ]+", " ", text)
+    normalized_text = re.sub(r"\s+", " ", normalized_text).lower()
     for skill in CANDIDATE["skills"]:
-        if skill.lower() in jt or skill.lower().replace(" ", "-") in jt:
+        sk = skill.lower()
+        variants = {sk, sk.replace(" ", "-"), sk.replace(" ", "/")}
+        if any(v in normalized_text for v in variants):
             matched.append(skill)
 
-    score += min(12, len(matched))
-    reasons.append(f"{len(matched)} relevant skills detected")
+    skill_points = min(12, len(matched) * 2)
+    score += skill_points
+    if matched:
+        reasons.append("Matched skills: " + ", ".join(matched[:6]))
+    else:
+        reasons.append("No configured skills detected")
     return min(100, score), reasons, matched
 
 
@@ -1015,7 +1025,26 @@ def import_job_items(items):
         if exp is None:
             exp = extract_experience(j["description"])
         base = {**j, "salary_min": smin, "salary_max": smax, "experience_min": exp}
+        try:
+            if AI_PROVIDER != "none":
+                from ai_engine import extract_job_intelligence
+                intel = extract_job_intelligence(base["title"], base["description"])
+                if isinstance(intel, dict):
+                    if base.get("experience_min") is None and intel.get("experience_years") is not None:
+                        base["experience_min"] = float(intel["experience_years"])
+                    if base.get("salary_min") is None and intel.get("salary_min_lpa") is not None:
+                        base["salary_min"] = float(intel["salary_min_lpa"])
+                    if base.get("salary_max") is None and intel.get("salary_max_lpa") is not None:
+                        base["salary_max"] = float(intel["salary_max_lpa"])
+                    ai_skills = intel.get("required_skills") or []
+                    base["_ai_skills"] = ai_skills
+        except Exception:
+            pass
         sc, reasons, matched = score_job(base)
+        ai_skills = base.get("_ai_skills") or []
+        if ai_skills:
+            matched = list(dict.fromkeys(matched + [str(x) for x in ai_skills if str(x).strip()]))
+            reasons.append("AI extracted required skills")
         status = "ready" if sc > 0 else "skipped"
         try:
             c.execute(
@@ -1103,6 +1132,7 @@ def run_discovery(body):
         "max_experience": max_experience,
         "min_salary": min_salary,
         "sources_checked": source_status,
+        "provider_summary": {str(x.get("source")): int(x.get("found") or 0) for x in source_status},
         "items_seen": len(items),
         "new_jobs": len(results),
         "qualified_jobs": len(qualified),
@@ -1204,6 +1234,11 @@ def config_status():
     return jsonify({
         "auto_apply_enabled": AUTO_APPLY_ENABLED,
         "auto_apply_max": AUTO_APPLY_MAX,
+        "ai": {
+            "provider": AI_PROVIDER,
+            "configured": bool((AI_PROVIDER == "gemini" and GEMINI_API_KEY) or AI_PROVIDER == "ollama" or AI_PROVIDER == "none"),
+            "model": GEMINI_MODEL if AI_PROVIDER == "gemini" else os.getenv("OLLAMA_MODEL", "gemma3"),
+        },
         "candidate_email_configured": bool(CANDIDATE_EMAIL),
         "candidate_phone_configured": bool(CANDIDATE_PHONE),
         "resume_configured": resume_file_path().is_file(),
