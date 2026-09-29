@@ -67,6 +67,15 @@ details{margin-top:8px}summary{cursor:pointer;color:#bcd8ff;font-size:12px}.hist
 <script>
 const $=id=>document.getElementById(id);
 function esc(v){return String(v??'').replace(/[&<>'"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[c]))}
+async function api(path, options={}){
+ try{
+  const r=await fetch(path, options);
+  const text=await r.text();
+  let data={}; try{data=JSON.parse(text)}catch(_){data={error:text||('HTTP '+r.status)}}
+  if(!r.ok) throw new Error(data.error||data.details||('HTTP '+r.status));
+  return data;
+ }catch(e){throw new Error(e.message||String(e))}
+}
 function val(id){return $(id).value.trim()}
 async function uploadResume(){
  const file=$('resumeFile').files[0];
@@ -77,7 +86,14 @@ async function uploadResume(){
  await loadConfig();
 }
 async function loadConfig(){
- const c=await fetch('/api/config').then(r=>r.json());
+ const c=await api('/api/config');
+ let provider='';
+ try{
+  const p=await api('/api/provider-check');
+  provider='<div class="check ok"><b>Live provider check</b><br>Jobicy API OK · '+esc(p.jobicy.count)+' jobs returned<br>'+esc((p.jobicy.sample_titles||[]).join(' · '))+'</div>';
+ }catch(e){
+  provider='<div class="check bad"><b>Live provider check FAILED</b><br>'+esc(e.message)+'</div>';
+ }
  $('config').innerHTML=[
   ['Auto apply',c.auto_apply_enabled,c.auto_apply_enabled?'Enabled':'Disabled'],
   ['Email',c.candidate_email_configured,c.candidate_email_configured?'Configured':'Missing'],
@@ -85,7 +101,7 @@ async function loadConfig(){
   ['Resume',c.resume_configured,c.resume_configured?'Configured':'Missing'],
   ['Jobicy provider',c.discovery_sources && c.discovery_sources.Jobicy,(c.discovery_sources && c.discovery_sources.Jobicy_direct_application_urls) ? 'Commercial API · direct ATS URLs' : 'Public API · Jobicy listings'],
   ['ATS adapters',true,c.supported_browser_adapters.join(', ')]
- ].map(x=>'<div class="check '+(x[1]?'ok':'bad')+'"><b>'+esc(x[0])+'</b><br>'+esc(x[2])+'</div>').join('');
+ ].map(x=>'<div class="check '+(x[1]?'ok':'bad')+'"><b>'+esc(x[0])+'</b><br>'+esc(x[2])+'</div>').join('')+provider;
 }
 function jobCard(j){
  const reasons=(j.reasons||[]).map(x=>'<div>• '+esc(x)+'</div>').join('');
@@ -104,13 +120,13 @@ function jobCard(j){
 }
 function adapterFor(url){const u=(url||'').toLowerCase();if(u.includes('greenhouse.io'))return 'greenhouse';if(u.includes('lever.co'))return 'lever';return 'unsupported'}
 async function loadJobs(){
- const jobs=await fetch('/api/jobs').then(r=>r.json());
+ const jobs=await api('/api/jobs');
  $('kFound').textContent=jobs.length;
  $('kQualified').textContent=jobs.filter(j=>Number(j.match_score||0)>=Number(val('threshold')||70)).length;
  $('jobs').innerHTML=jobs.length?jobs.map(jobCard).join(''):'<div class="empty">No jobs found yet.</div>';
 }
 async function loadHistory(){
- const apps=await fetch('/api/applications').then(r=>r.json());
+ const apps=await api('/api/applications');
  $('kSubmitted').textContent=apps.filter(a=>a.status==='applied').length;
  $('kAction').textContent=apps.filter(a=>['requires_user_action','requires_configuration','failed','unsupported','unsupported_source_policy'].includes(a.status)).length;
  $('history').innerHTML=apps.length?apps.map(a=>'<div class="historyrow"><div><b>'+esc(a.title)+'</b><br>'+esc(a.company)+'</div><div>'+esc(a.status)+'</div><div>'+esc(a.adapter||'—')+'</div><div>'+esc(a.submission_message||'—')+'</div></div>').join(''):'<div class="empty">No application attempts yet.</div>';
@@ -119,9 +135,9 @@ async function loadAll(){await Promise.all([loadConfig(),loadJobs(),loadHistory(
 async function discover(auto){
  const payload={query:val('query')||'QA Automation Engineer',location:val('location')||'India',remote:$('remote').value==='true',threshold:Number(val('threshold')||70),max_experience:Number(val('maxExp')||2),min_salary:Number(val('minSalary')||3)};
  $('status').textContent='Querying live Jobicy remote-job data and scoring the returned listings...';
- const r=await fetch('/api/discover',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
- const x=await r.json();
- if(!r.ok){$('status').textContent=x.error||'Discovery failed';return}
+ let x;
+ try{x=await api('/api/discover',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)})}
+ catch(e){$('status').textContent='Discovery failed: '+e.message;return}
  const provider=(x.sources_checked||[]).map(v=>v.source+': '+v.found+(v.raw_found!=null?' raw/'+v.raw_found:'')+(v.configured?'':' (not configured)')).join(' · ');
  $('status').textContent='Found '+x.items_seen+' listings. '+provider+' · '+x.qualified_jobs+' qualified at '+x.threshold+'%+.'+(x.errors&&x.errors.length?' Provider error: '+x.errors.map(e=>e.error||e.source).join(' | '):'');
  await loadJobs();
@@ -131,8 +147,9 @@ async function discover(auto){
   $('status').textContent+=' Starting '+candidates.length+' automatic application(s)...';
   let submitted=0, action=0;
   for(const j of candidates){
-   const rr=await fetch('/api/jobs/'+j.job_id+'/auto-apply',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({threshold:x.threshold,max_experience:Number(val('maxExp')||2),min_salary:Number(val('minSalary')||3)})});
-   const z=await rr.json();
+   let z;
+   try{z=await api('/api/jobs/'+j.job_id+'/auto-apply',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({threshold:x.threshold,max_experience:Number(val('maxExp')||2),min_salary:Number(val('minSalary')||3)})})}
+   catch(e){z={status:'failed',message:e.message}}
    if(z.submitted)submitted++; else if(['requires_user_action','requires_configuration'].includes(z.status))action++;
   }
   $('status').textContent+=' Finished: '+submitted+' submitted · '+action+' require user action/configuration.';
@@ -142,8 +159,9 @@ async function discover(auto){
 async function applyJob(id){
  const threshold=Number(val('threshold')||70);
  $('status').textContent='Applying to the selected qualified job...';
- const r=await fetch('/api/jobs/'+id+'/auto-apply',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({threshold,max_experience:Number(val('maxExp')||2),min_salary:Number(val('minSalary')||3)})});
- const x=await r.json();
+ let x;
+ try{x=await api('/api/jobs/'+id+'/auto-apply',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({threshold,max_experience:Number(val('maxExp')||2),min_salary:Number(val('minSalary')||3)})})}
+ catch(e){x={status:'failed',message:e.message}}
  $('status').textContent=x.message||x.error||x.status;
  await loadAll();
 }
