@@ -365,26 +365,35 @@ def parse_salary_text(text):
 def fetch_json(url, params=None, headers=None, timeout=None):
     from urllib.parse import urlencode
     import gzip
+    import time
     target = url
     if params:
         target += ("&" if "?" in target else "?") + urlencode(params)
     request_headers = {
-        "User-Agent": "ApplyBot/1.0 (+in-app job discovery)",
-        "Accept": "application/json",
+        "User-Agent": "ApplyBot/1.1 (+in-app job discovery; live API client)",
+        "Accept": "application/json, text/plain, */*",
         "Accept-Encoding": "gzip",
         "Cache-Control": "no-cache",
+        "Connection": "close",
     }
     if headers:
         request_headers.update(headers)
-    req = urllib.request.Request(target, headers=request_headers)
-    try:
-        with urllib.request.urlopen(req, timeout=timeout or JOBICY_TIMEOUT) as response:
-            raw = response.read()
-            if response.headers.get("Content-Encoding", "").lower() == "gzip":
-                raw = gzip.decompress(raw)
-            return json.loads(raw.decode("utf-8"))
-    except Exception as exc:
-        raise RuntimeError(f"GET {target} failed: {exc}") from exc
+    last_error = None
+    for attempt in range(3):
+        req = urllib.request.Request(target, headers=request_headers)
+        try:
+            with urllib.request.urlopen(req, timeout=timeout or JOBICY_TIMEOUT) as response:
+                raw = response.read()
+                if response.headers.get("Content-Encoding", "").lower() == "gzip":
+                    raw = gzip.decompress(raw)
+                return json.loads(raw.decode("utf-8"))
+        except Exception as exc:
+            last_error = exc
+            status = getattr(exc, "code", None)
+            if status not in (429, 500, 502, 503, 504) or attempt == 2:
+                break
+            time.sleep(1.5 * (attempt + 1))
+    raise RuntimeError(f"GET {target} failed after 3 attempts: {last_error}")
 
 
 def post_json(url, payload, headers=None, timeout=120):
@@ -899,9 +908,23 @@ def provider_check():
     """Non-mutating smoke test for Jobicy public API and DB schema."""
     result = {"service": "ApplyBot", "provider": "Jobicy Public REST API", "database": "postgres" if is_postgres() else "sqlite"}
     try:
-        data = fetch_json(JOBICY_API_URL, {"count": 5, "tag": "qa"}, headers={}, timeout=JOBICY_TIMEOUT)
-        jobs = normalize_jobicy_jobs(data)
-        result["jobicy"] = {"ok": True, "count": len(jobs), "sample_titles": [j["title"] for j in jobs[:5]], "sample_locations": [j["location"] for j in jobs[:5]], "endpoint": JOBICY_API_URL}
+        provider_attempts = [
+            {"count": 5, "tag": "qa"},
+            {"count": 5},
+        ]
+        last_provider_error = None
+        jobs = []
+        for provider_params in provider_attempts:
+            try:
+                data = fetch_json(JOBICY_API_URL, provider_params, headers={}, timeout=JOBICY_TIMEOUT)
+                jobs = normalize_jobicy_jobs(data)
+                if jobs:
+                    break
+            except Exception as exc:
+                last_provider_error = exc
+        if not jobs and last_provider_error:
+            raise last_provider_error
+        result["jobicy"] = {"ok": bool(jobs), "count": len(jobs), "sample_titles": [j["title"] for j in jobs[:5]], "sample_locations": [j["location"] for j in jobs[:5]], "endpoint": JOBICY_API_URL, "attempts": provider_attempts}
     except Exception as exc:
         result["jobicy"] = {"ok": False, "error": str(exc)[:1000]}
     try:
@@ -951,7 +974,7 @@ def jobs():
         if ENABLE_LEGACY_SOURCES:
             rows = c.execute("SELECT * FROM jobs ORDER BY match_score DESC, discovered_at DESC").fetchall()
         else:
-            rows = c.execute("SELECT * FROM jobs WHERE source=? OR source LIKE 'user-assisted%' ORDER BY match_score DESC, discovered_at DESC", ("Jobicy",)).fetchall()
+            rows = c.execute("SELECT * FROM jobs WHERE source=? OR source LIKE 'user-assisted%%' ORDER BY match_score DESC, discovered_at DESC", ("Jobicy",)).fetchall()
         c.close()
         payload = []
         for row in rows:
