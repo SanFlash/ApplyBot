@@ -990,7 +990,8 @@ def _jobicy_search_tags(query):
 
 
 def job_matches_query(job, query):
-    """Require actual query/role relevance before a listing enters ApplyBot results."""    q = (query or "").strip().lower()
+    """Require actual query/role relevance before a listing enters ApplyBot results."""
+    q = (query or "").strip().lower()
     if not q:
         return True
     title = (job.get("title") or "").lower()
