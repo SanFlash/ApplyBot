@@ -1474,9 +1474,21 @@ def provider_check():
     """Live smoke test for the active discovery stack and database."""
     result = {
         "service": "ApplyBot",
-        "strategy": "Employer ATS + career-site JSON-LD discovery + The Muse/RemoteOK/Jobicy fallbacks",
+        "strategy": "Free ATS dataset first + direct public ATS feeds + public fallbacks (no paid API required)",
         "database": "postgres" if is_postgres() else "sqlite",
     }
+
+    try:
+        from providers_v4 import _fetch_dataset
+        free_jobs, _ = _fetch_dataset()
+        result["free_ats_dataset"] = {
+            "ok": bool(free_jobs),
+            "count": len(free_jobs),
+            "provider": "ConorsCode/open-jobs-data",
+            "endpoint": "https://raw.githubusercontent.com/ConorsCode/open-jobs-data/main/data/jobs.json",
+        }
+    except Exception as exc:
+        result["free_ats_dataset"] = {"ok": False, "error": str(exc)[:1000]}
 
     try:
         if BRAVE_SEARCH_API_KEY and BRAVE_SEARCH_ENABLED:
@@ -1550,7 +1562,8 @@ def provider_check():
         result["database_schema"] = {"ok": False, "error": str(exc)[:1000]}
 
     result["ok"] = bool(
-        result.get("career_web_search", {}).get("ok")
+        result.get("free_ats_dataset", {}).get("ok")
+        or result.get("career_web_search", {}).get("ok")
         or result.get("jobicy", {}).get("ok")
         or result.get("muse", {}).get("ok")
         or result.get("remoteok", {}).get("ok")
