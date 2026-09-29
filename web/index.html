@@ -90,6 +90,7 @@ async function loadConfig(){
  let provider='';
  try{
   const p=await api('/api/provider-check');
+  const providerNames=(c.discovery_sources||{}); 
   provider='<div class="check ok"><b>Live provider check</b><br>Jobicy API OK · '+esc(p.jobicy.count)+' jobs returned<br>'+esc((p.jobicy.sample_titles||[]).join(' · '))+'</div>';
  }catch(e){
   provider='<div class="check bad"><b>Live provider check FAILED</b><br>'+esc(e.message)+'</div>';
@@ -100,6 +101,10 @@ async function loadConfig(){
   ['Phone',c.candidate_phone_configured,c.candidate_phone_configured?'Configured':'Missing'],
   ['Resume',c.resume_configured,c.resume_configured?'Configured':'Missing'],
   ['Jobicy provider',c.discovery_sources && c.discovery_sources.Jobicy,(c.discovery_sources && c.discovery_sources.Jobicy_direct_application_urls) ? 'Commercial API · direct ATS URLs' : 'Public API · Jobicy listings'],
+  ['India provider',!!(c.discovery_sources && c.discovery_sources.Jobvetta),'Jobvetta '+(c.discovery_sources && c.discovery_sources.Jobvetta?'connected':'API key required')],
+  ['IndianAPI',!!(c.discovery_sources && c.discovery_sources.IndianAPI),'IndianAPI '+(c.discovery_sources && c.discovery_sources.IndianAPI?'connected':'API key optional')],
+  ['Remote provider',!!(c.discovery_sources && c.discovery_sources.RemoteOK),'RemoteOK '+(c.discovery_sources && c.discovery_sources.RemoteOK?'enabled':'disabled')],
+  ['LinkedIn / Indeed',false,'Official API authorization required · scraping disabled'],
   ['ATS adapters',true,c.supported_browser_adapters.join(', ')]
  ].map(x=>'<div class="check '+(x[1]?'ok':'bad')+'"><b>'+esc(x[0])+'</b><br>'+esc(x[2])+'</div>').join('')+provider;
 }
@@ -134,7 +139,7 @@ async function loadHistory(){
 async function loadAll(){await Promise.all([loadConfig(),loadJobs(),loadHistory()])}
 async function discover(auto){
  const payload={query:val('query')||'QA Automation Engineer',location:val('location')||'India',remote:$('remote').value==='true',threshold:Number(val('threshold')||70),max_experience:Number(val('maxExp')||2),min_salary:Number(val('minSalary')||3)};
- $('status').textContent='Querying live Jobicy remote-job data and scoring the returned listings...';
+ $('status').textContent='Querying live job providers for '+(payload.query)+' in '+(payload.location)+' and scoring the returned listings...';
  let x;
  try{x=await api('/api/discover',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)})}
  catch(e){$('status').textContent='Discovery failed: '+e.message;return}
