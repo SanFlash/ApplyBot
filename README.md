@@ -325,7 +325,7 @@ https://github.com/SanFlash/ApplyBot
 
 ApplyBot now supports multiple in-app discovery providers. For India, **Jobvetta** is the preferred additional provider: its free API provides live India jobs gathered from official employer sources, with 50 API requests per key per UTC day. IndianAPI can also be enabled with its free API key. RemoteOK is enabled for remote-only searches. Adzuna and Arbeitnow remain optional legacy providers.
 
-LinkedIn and Indeed are **not scraped**. LinkedIn's current terms prohibit automated scraping/data extraction without written authorization, and Indeed's developer access is controlled through approved API/integration terms. ApplyBot therefore exposes these as official-API-ready providers rather than using an unauthorized scraper.
+LinkedIn remains disabled unless you have an authorized LinkedIn API integration. **Indeed is now supported through your subscribed RapidAPI Indeed Jobs API** (`indeed-jobs-api.p.rapidapi.com`). ApplyBot does not scrape Indeed directly; it calls the RapidAPI provider server-side using `X-RapidAPI-Key` and `X-RapidAPI-Host`.
 
 To enable India sources on Render:
 1. Create a free Jobvetta API key.
@@ -473,3 +473,95 @@ Current production deployment verified on 2026-09-28:
 - status: `live`
 - primary URL: `https://applybot-ykp7.onrender.com`
 
+
+
+## Indeed RapidAPI integration
+
+ApplyBot now includes a first-class **Indeed RapidAPI** discovery provider using the API documented in your RapidAPI subscription.
+
+Base URL:
+
+```
+https://indeed-jobs-api.p.rapidapi.com
+```
+
+Required server-side headers:
+
+```
+X-RapidAPI-Key: <your key>
+X-RapidAPI-Host: indeed-jobs-api.p.rapidapi.com
+```
+
+The provider calls `GET /jobs` and supports the documented `query`, `location`, `country`, `page`, `datePosted`, `remoteOnly`, `workSetting`, `jobType`, `experienceLevel`, `sort` and related filters. It uses the API's 15-results-per-page pagination and deduplicates jobs by `jobKey`.
+
+### What ApplyBot does with Indeed results
+
+1. Searches the user's requested role.
+2. Adds a small set of related QA roles (`QA Automation Engineer`, `Automation Tester`, `SDET`) so one exact title does not unnecessarily limit discovery.
+3. Uses the correct Indeed country code; India is `IN`.
+4. Supports India city searches and remote searches.
+5. Uses `thirdPartyApplyUrl` when supplied, otherwise the Indeed `applyUrl`.
+6. Normalizes title, company, location, remote/hybrid mode, job ID, posted date, job type and salary metadata.
+7. Deduplicates repeated results across query variants/pages.
+8. Sends the normalized jobs through the existing role, experience, location, salary and skill matcher.
+9. Keeps the RapidAPI key exclusively on the server.
+10. Continues other providers when one Indeed query/page fails.
+
+### Important salary handling
+
+The RapidAPI documentation describes the Indeed `salaryMin`/`salaryMax` search filters and returned salary values as **USD**. ApplyBot therefore does **not** silently treat those values as INR/LPA. By default salary conversion is disabled, so an Indeed USD salary cannot create a false INR qualification.
+
+If you have a trusted USD→INR rate, configure:
+
+```env
+INDEED_CONVERT_USD_SALARY=true
+INDEED_USD_TO_INR=YOUR_TRUSTED_RATE
+```
+
+### Render configuration
+
+In **Render → ApplyBot → Environment Variables**, add:
+
+```env
+INDEED_RAPIDAPI_ENABLED=true
+INDEED_RAPIDAPI_KEY=YOUR_RAPIDAPI_KEY
+INDEED_RAPIDAPI_HOST=indeed-jobs-api.p.rapidapi.com
+INDEED_RAPIDAPI_URL=https://indeed-jobs-api.p.rapidapi.com
+INDEED_MAX_PAGES=2
+INDEED_MAX_QUERIES=3
+INDEED_DATE_POSTED=7
+INDEED_CONVERT_USD_SALARY=false
+INDEED_USD_TO_INR=0
+```
+
+Never commit `INDEED_RAPIDAPI_KEY` to GitHub.
+
+### Request-volume control
+
+The default is deliberately conservative: up to 3 query variants × 2 pages per discovery. Because your RapidAPI account is subscribed to the BASIC plan, keep these values modest and watch your RapidAPI quota/usage dashboard. You can reduce them to `INDEED_MAX_QUERIES=1` and `INDEED_MAX_PAGES=1` while testing.
+
+### Diagnostics
+
+After Render redeploys, use:
+
+```
+GET /api/discovery-diagnostics?query=QA%20Automation%20Engineer&location=India&remote=false
+```
+
+and:
+
+```
+GET /api/provider-check
+```
+
+The discovery diagnostics include the provider status, query variants, pages checked and any RapidAPI errors. A RapidAPI failure for one query does not abort the other provider searches.
+
+### Local setup
+
+```powershell
+$env:INDEED_RAPIDAPI_ENABLED="true"
+$env:INDEED_RAPIDAPI_KEY="YOUR_RAPIDAPI_KEY"
+python app.py
+```
+
+Then open `http://localhost:8000`, search for `QA Automation Engineer`, select `India`, and inspect the source/provider column for **Indeed RapidAPI**.
