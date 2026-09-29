@@ -773,7 +773,7 @@ def _jobicy_search_tag(query):
     q = requested.lower()
     for role in CANDIDATE["roles_primary"]:
         if role.lower() in q or q in role.lower():
-            words = [w for w in re.findall(r"[a-z]+", role.lower()) if len(w) >= 3]
+            words = [w for w in re.findall(r"[a-z]+", role.lower()) if len(w) >= 3 or w == "qa"]
             for preferred in ("qa", "sdet", "automation", "tester", "testing", "software"):
                 if preferred in words:
                     return preferred
