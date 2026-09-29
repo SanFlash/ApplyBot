@@ -55,7 +55,15 @@ services:
       - key: BRAVE_SEARCH_API_KEY
         sync: false
       - key: BRAVE_SEARCH_ENABLED
+        value: "false"
+      - key: FREE_JOB_DATASET_ENABLED
         value: "true"
+      - key: FREE_JOB_DATASET_URL
+        value: "https://raw.githubusercontent.com/ConorsCode/open-jobs-data/main/data/jobs.json"
+      - key: FREE_JOB_DATASET_TIMEOUT
+        value: "30"
+      - key: FREE_JOB_DATASET_CACHE_SECONDS
+        value: "900"
       - key: BRAVE_MAX_QUERIES
         value: "5"
       - key: ASHBY_BOARDS
