@@ -1468,39 +1468,55 @@ def discovery_diagnostics():
 
 @app.get("/api/provider-check")
 def provider_check():
-    """Non-mutating smoke test for Jobicy public API and DB schema."""
-    result = {"service": "ApplyBot", "provider": "Jobicy Public REST API", "database": "postgres" if is_postgres() else "sqlite"}
+    """Live smoke test for the active discovery stack and database."""
+    result = {
+        "service": "ApplyBot",
+        "strategy": "Jobicy + The Muse + RemoteOK + configured employer ATS APIs",
+        "database": "postgres" if is_postgres() else "sqlite",
+    }
+
     try:
-        provider_attempts = [
-            {"count": 5, "tag": "qa"},
-            {"count": 5},
-        ]
-        last_provider_error = None
-        jobs = []
-        for provider_params in provider_attempts:
-            try:
-                data = fetch_json(JOBICY_API_URL, provider_params, headers={}, timeout=JOBICY_TIMEOUT)
-                jobs = normalize_jobicy_jobs(data)
-                if jobs:
-                    break
-            except Exception as exc:
-                last_provider_error = exc
-        if not jobs and last_provider_error:
-            raise last_provider_error
-        result["jobicy"] = {"ok": bool(jobs), "count": len(jobs), "sample_titles": [j["title"] for j in jobs[:5]], "sample_locations": [j["location"] for j in jobs[:5]], "endpoint": JOBICY_API_URL, "attempts": provider_attempts}
+        data = fetch_json(JOBICY_API_URL, {"count": 5, "tag": "qa"}, timeout=JOBICY_TIMEOUT)
+        jobs = normalize_jobicy_jobs(data)
+        result["jobicy"] = {
+            "ok": bool(jobs),
+            "count": len(jobs),
+            "sample_titles": [j["title"] for j in jobs[:5]],
+            "endpoint": JOBICY_API_URL,
+        }
     except Exception as exc:
         result["jobicy"] = {"ok": False, "error": str(exc)[:1000]}
+
     try:
-        if INDEED_RAPIDAPI_ENABLED and INDEED_RAPIDAPI_KEY:
-            headers={"X-RapidAPI-Key":INDEED_RAPIDAPI_KEY,"X-RapidAPI-Host":INDEED_RAPIDAPI_HOST}
-            probe_url = INDEED_RAPIDAPI_URL + INDEED_RAPIDAPI_PATH
-            probe = fetch_json(probe_url, {"query":"QA Automation Engineer","location":"India","country":"IN","page":1}, headers=headers, timeout=JOBICY_TIMEOUT)
-            result["indeed"]={"ok":isinstance(probe,dict),"configured":True,"authorization_ok":True,"endpoint":probe_url,"jobs_returned":len(normalize_indeed_jobs(probe))}
-        else:
-            result["indeed"]={"ok":False,"configured":False,"authorization_ok":False,"error":"RapidAPI key required"}
+        data = fetch_json(
+            "https://www.themuse.com/api/public/jobs",
+            {"page": 0, "location": "India", "category": "Software Engineering", "descending": "true"},
+            timeout=JOBICY_TIMEOUT,
+        )
+        jobs = normalize_muse_jobs(data)
+        result["muse"] = {
+            "ok": bool(jobs),
+            "count": len(jobs),
+            "sample_titles": [j["title"] for j in jobs[:5]],
+            "endpoint": "https://www.themuse.com/api/public/jobs",
+        }
     except Exception as exc:
-        message = str(exc)[:1200]
-        result["indeed"]={"ok":False,"configured":True,"authorization_ok":not ("HTTP 401" in message or "HTTP 403" in message or "Forbidden" in message),"endpoint":INDEED_RAPIDAPI_URL + INDEED_RAPIDAPI_PATH,"error":message,"action":"Verify the RapidAPI subscription, API key, host and endpoint access in the RapidAPI console."}
+        result["muse"] = {"ok": False, "error": str(exc)[:1000]}
+
+    try:
+        if REMOTEOK_ENABLED:
+            jobs = normalize_remoteok_jobs(fetch_json("https://remoteok.com/api", timeout=JOBICY_TIMEOUT))
+            result["remoteok"] = {
+                "ok": bool(jobs),
+                "count": len(jobs),
+                "sample_titles": [j["title"] for j in jobs[:5]],
+                "endpoint": "https://remoteok.com/api",
+            }
+        else:
+            result["remoteok"] = {"ok": False, "configured": False}
+    except Exception as exc:
+        result["remoteok"] = {"ok": False, "error": str(exc)[:1000]}
+
     try:
         c = db()
         if c.pg:
@@ -1514,7 +1530,12 @@ def provider_check():
         result["database_schema"] = {"ok": required.issubset(columns), "missing": sorted(required - columns)}
     except Exception as exc:
         result["database_schema"] = {"ok": False, "error": str(exc)[:1000]}
-    result["ok"] = bool(result.get("jobicy", {}).get("ok") and result.get("database_schema", {}).get("ok"))
+
+    result["ok"] = bool(
+        result.get("jobicy", {}).get("ok")
+        or result.get("muse", {}).get("ok")
+        or result.get("remoteok", {}).get("ok")
+    ) and bool(result.get("database_schema", {}).get("ok"))
     return jsonify(result), (200 if result["ok"] else 503)
 
 @app.get("/api/config")
