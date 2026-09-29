@@ -91,7 +91,7 @@ async function loadConfig(){
  try{
   const p=await api('/api/provider-check');
   const providerNames=(c.discovery_sources||{}); 
-  provider='<div class="check ok"><b>Live provider check</b><br>Jobicy API OK · '+esc(p.jobicy.count)+' jobs returned<br>'+esc((p.jobicy.sample_titles||[]).join(' · '))+'</div>';
+  provider='<div class="check ok"><b>Live provider check</b><br>Jobicy API OK · '+esc(p.jobicy.count)+' jobs returned<br>'+esc((p.jobicy.sample_titles||[]).join(' · '))+(p.indeed ? '<br>Indeed RapidAPI: '+esc(p.indeed.ok ? 'API authorization OK' : (p.indeed.error||'not available')) : '')+'</div>';
  }catch(e){
   provider='<div class="check bad"><b>Live provider check FAILED</b><br>'+esc(e.message)+'</div>';
  }
@@ -104,7 +104,8 @@ async function loadConfig(){
   ['India provider',!!(c.discovery_sources && c.discovery_sources.Jobvetta),'Jobvetta '+(c.discovery_sources && c.discovery_sources.Jobvetta?'connected':'API key required')],
   ['IndianAPI',!!(c.discovery_sources && c.discovery_sources.IndianAPI),'IndianAPI '+(c.discovery_sources && c.discovery_sources.IndianAPI?'connected':'API key optional')],
   ['Remote provider',!!(c.discovery_sources && c.discovery_sources.RemoteOK),'RemoteOK '+(c.discovery_sources && c.discovery_sources.RemoteOK?'enabled':'disabled')],
-  ['LinkedIn / Indeed',false,'Official API authorization required · scraping disabled'],
+  ['LinkedIn',false,'Official API authorization required · scraping disabled'],
+  ['Indeed RapidAPI',!!(c.discovery_sources && c.discovery_sources.Indeed),c.discovery_sources && c.discovery_sources.Indeed ? 'Configured · '+(c.discovery_sources.Indeed_provider||'Indeed API') : 'RapidAPI key required'],
   ['ATS adapters',true,c.supported_browser_adapters.join(', ')]
  ].map(x=>'<div class="check '+(x[1]?'ok':'bad')+'"><b>'+esc(x[0])+'</b><br>'+esc(x[2])+'</div>').join('')+provider;
 }
@@ -143,7 +144,7 @@ async function discover(auto){
  let x;
  try{x=await api('/api/discover',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)})}
  catch(e){$('status').textContent='Discovery failed: '+e.message;return}
- const provider=(x.sources_checked||[]).map(v=>v.source+': '+v.found+(v.raw_found!=null?' raw/'+v.raw_found:'')+(v.configured?'':' (not configured)')).join(' · ');
+ const provider=(x.sources_checked||[]).map(v=>v.source+': '+v.found+(v.raw_found!=null?' raw/'+v.raw_found:'')+(v.configured?'':' (not configured)')+(v.fallback_notes&&v.fallback_notes.length?' [fallback used]':'')).join(' · ');
  $('status').textContent='Found '+x.items_seen+' listings. '+provider+' · '+x.qualified_jobs+' qualified at '+x.threshold+'%+.'+(x.errors&&x.errors.length?' Provider error: '+x.errors.map(e=>e.error||e.source).join(' | '):'');
  await loadJobs();
  if(auto){
