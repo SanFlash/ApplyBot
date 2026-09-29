@@ -3,172 +3,240 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>ApplyBot — Job Discovery & Auto Apply</title>
+<title>ApplyBot — Job Search Workspace</title>
 <style>
-:root{--bg:#08111f;--panel:#101c30;--panel2:#0c1728;--line:#223653;--text:#eef5ff;--muted:#8fa4bf;--blue:#75a9ff;--green:#3ddd91;--yellow:#ffd166;--red:#ff6b7a}
-*{box-sizing:border-box}body{margin:0;background:radial-gradient(circle at 15% 0,#162b4b 0,#08111f 38%,#060d18 100%);color:var(--text);font:14px Inter,system-ui,-apple-system,Segoe UI,sans-serif}
-header{position:sticky;top:0;z-index:10;background:#08111fee;backdrop-filter:blur(16px);border-bottom:1px solid var(--line);padding:16px 4vw;display:flex;justify-content:space-between;align-items:center;gap:15px}
-.brand{font-size:21px;font-weight:900}.badge{font-size:11px;color:#bcd8ff;border:1px solid #31527b;padding:5px 8px;border-radius:99px;margin-left:7px}.wrap{max-width:1450px;margin:auto;padding:25px 4vw 60px}
-.grid{display:grid;grid-template-columns:repeat(4,1fr);gap:12px}.card{background:linear-gradient(180deg,#122038,#0e192b);border:1px solid var(--line);border-radius:16px;padding:18px}.kpi b{font-size:28px;display:block;margin-top:5px}.muted{color:var(--muted)}
-.controls{display:grid;grid-template-columns:2fr 1fr 1fr 1fr;gap:10px}.controls+.controls{margin-top:10px}.field span{display:block;font-size:11px;color:var(--muted);margin-bottom:5px}
-input,button{font:inherit}input,select{width:100%;background:#081322;border:1px solid #29415f;color:var(--text);border-radius:10px;padding:11px;outline:none}
-button{border:0;border-radius:10px;padding:10px 13px;background:var(--blue);color:#06101d;font-weight:800;cursor:pointer}button.secondary{background:#1b2b45;color:#dceaff}button.danger{background:#3a1f2a;color:#ffb5bf}
-.actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}.status{margin-top:12px;padding:10px 12px;background:#091525;border:1px solid var(--line);border-radius:10px;color:#b9cce4}
-.jobs{display:grid;gap:12px;margin-top:15px}.job{display:grid;grid-template-columns:1.6fr .8fr .65fr 1fr auto;gap:12px;align-items:start}.title{font-size:16px;font-weight:850}.score{font-size:20px;font-weight:900;color:var(--green)}.pill{display:inline-block;padding:5px 8px;border-radius:8px;background:#182943;color:#c7daf4;font-size:11px}.source{color:#b8d5ff}.reason{font-size:12px;color:#b2c4db;line-height:1.55;margin-top:7px}.skills{display:flex;flex-wrap:wrap;gap:5px;margin-top:7px}.skill{font-size:10px;border:1px solid #29415f;padding:4px 6px;border-radius:99px;color:#a9caff}.jobmeta{font-size:12px;color:var(--muted);margin-top:5px}.empty{text-align:center;padding:50px;color:var(--muted)}
-details{margin-top:8px}summary{cursor:pointer;color:#bcd8ff;font-size:12px}.history{margin-top:14px;display:grid;gap:8px}.historyrow{display:grid;grid-template-columns:1.5fr .7fr .8fr 2fr;gap:10px;padding:11px;border:1px solid var(--line);border-radius:10px;background:#0a1525;font-size:12px}
-.config{display:grid;grid-template-columns:repeat(5,1fr);gap:8px;margin-top:12px}.check{padding:9px;border-radius:9px;background:#0a1525;border:1px solid var(--line);font-size:11px}.ok{color:var(--green)}.bad{color:var(--red)}
-@media(max-width:1000px){.grid{grid-template-columns:repeat(2,1fr)}.controls{grid-template-columns:1fr 1fr}.job{grid-template-columns:1fr 1fr}.job button{grid-column:1/-1;width:100%}.config{grid-template-columns:repeat(2,1fr)}}
-@media(max-width:600px){.grid,.controls,.config{grid-template-columns:1fr}.wrap{padding:18px 4vw}.job{grid-template-columns:1fr}.job button{grid-column:auto}.brand{font-size:18px}header{padding:14px 4vw}.hide-mobile{display:none}}
+:root{
+  --bg:#07111f;--panel:#0d1a2b;--panel2:#102139;--line:#1d3552;--text:#f4f8ff;
+  --muted:#8fa5bf;--accent:#71a7ff;--good:#43d99a;--warn:#ffd166;--bad:#ff7183;
+}
+*{box-sizing:border-box}
+body{margin:0;background:linear-gradient(135deg,#06101c 0%,#0a1728 52%,#08111e 100%);color:var(--text);font:14px Inter,system-ui,-apple-system,Segoe UI,sans-serif}
+button,input,select{font:inherit}
+button{border:0;border-radius:11px;padding:11px 15px;background:var(--accent);color:#06101c;font-weight:800;cursor:pointer}
+button.secondary{background:#182b45;color:#e7f0ff;border:1px solid #284463}
+button:disabled{opacity:.5;cursor:not-allowed}
+a{color:#9fc4ff}
+header{position:sticky;top:0;z-index:20;background:#07111fee;backdrop-filter:blur(18px);border-bottom:1px solid var(--line)}
+.nav{max-width:1320px;margin:auto;padding:15px 24px;display:flex;align-items:center;justify-content:space-between;gap:18px}
+.logo{font-size:22px;font-weight:950;letter-spacing:-.5px}.logo span{color:var(--accent)}
+.navnote{color:var(--muted);font-size:12px}
+.wrap{max-width:1320px;margin:auto;padding:34px 24px 70px}
+.hero{display:grid;grid-template-columns:1.45fr .8fr;gap:18px;align-items:stretch}
+.hero-main,.hero-side,.panel{background:linear-gradient(180deg,#102039,#0b1727);border:1px solid var(--line);border-radius:20px}
+.hero-main{padding:34px}
+.eyebrow{color:#9fc4ff;font-size:11px;font-weight:900;text-transform:uppercase;letter-spacing:1.5px}
+h1{font-size:clamp(32px,5vw,58px);line-height:1.02;margin:12px 0 14px;letter-spacing:-2px}
+.hero p{max-width:720px;color:var(--muted);font-size:16px;line-height:1.65;margin:0}
+.pipeline{display:flex;gap:8px;flex-wrap:wrap;margin-top:22px}
+.step{padding:7px 10px;border:1px solid #294766;border-radius:99px;color:#cfe0f7;background:#0a1728;font-size:11px}
+.hero-side{padding:24px;display:flex;flex-direction:column;justify-content:space-between}
+.health{padding:13px;border-radius:13px;background:#091625;border:1px solid var(--line)}
+.dot{display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--good);margin-right:7px}
+.dot.bad{background:var(--bad)}
+.muted{color:var(--muted)}
+.metrics{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-top:18px}
+.metric{padding:18px;background:#0d1a2b;border:1px solid var(--line);border-radius:16px}
+.metric b{display:block;font-size:29px;margin-top:4px}
+.panel{padding:22px;margin-top:18px}
+.panel-head{display:flex;align-items:center;justify-content:space-between;gap:15px;margin-bottom:18px}
+.panel h2{margin:0;font-size:18px}
+.search{display:grid;grid-template-columns:2fr 1fr 110px 110px;gap:10px}
+.field label{display:block;color:var(--muted);font-size:11px;margin:0 0 6px}
+input,select{width:100%;padding:12px;border-radius:11px;border:1px solid #294563;background:#081423;color:var(--text);outline:none}
+.actions{display:flex;gap:9px;flex-wrap:wrap;margin-top:12px}
+.search-actions{align-items:end}
+.options{display:grid;grid-template-columns:120px 120px 1fr;gap:10px;margin-top:10px}
+.toggle{display:flex;align-items:center;gap:8px;color:var(--muted);font-size:12px;padding-top:23px}
+.toggle input{width:auto}
+.status{margin-top:14px;padding:12px 14px;border:1px solid var(--line);border-radius:12px;background:#091625;color:#c9d8ea;line-height:1.5}
+.status.good{border-color:#245d49}.status.bad{border-color:#65313c;color:#ffb4bf}
+.results{display:grid;gap:12px}
+.job{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:18px;padding:20px;border:1px solid var(--line);border-radius:16px;background:#0a1727}
+.job-top{display:flex;justify-content:space-between;gap:12px}
+.job-title{font-size:17px;font-weight:900}.company{margin-top:4px;color:#b7c9df}
+.meta{display:flex;flex-wrap:wrap;gap:7px;margin-top:10px}
+.tag{font-size:11px;padding:6px 8px;border-radius:8px;background:#11233a;border:1px solid #25415f;color:#c9dcf5}
+.score{min-width:78px;text-align:center;padding:10px 8px;border-radius:12px;background:#0b2b25;color:var(--good);font-weight:950;font-size:20px}
+.job-actions{display:flex;align-items:center;justify-content:flex-end;gap:8px;flex-wrap:wrap;margin-top:14px}
+.job-links{margin-top:10px;font-size:12px}
+details{margin-top:12px;border-top:1px solid #1b304a;padding-top:10px}
+summary{cursor:pointer;color:#a8c9f8;font-size:12px}
+.reasons{color:var(--muted);line-height:1.65;margin-top:8px}
+.skills{display:flex;gap:5px;flex-wrap:wrap;margin-top:8px}
+.skill{font-size:10px;padding:5px 7px;border-radius:99px;border:1px solid #2a4867;color:#b9d5f5}
+.history{display:grid;gap:8px}
+.history-row{display:grid;grid-template-columns:1.4fr .8fr .8fr 2fr;gap:10px;padding:12px;border:1px solid var(--line);border-radius:12px;background:#091625;font-size:12px}
+.empty{text-align:center;padding:48px 20px;color:var(--muted);border:1px dashed #29415e;border-radius:14px}
+.config{display:flex;gap:8px;flex-wrap:wrap}
+.config-tag{font-size:11px;padding:7px 9px;border:1px solid #294563;border-radius:99px;color:#bcd0e8;background:#0a1727}
+.resume{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-top:12px;padding:13px;border:1px dashed #294563;border-radius:13px}
+small{color:var(--muted)}
+@media(max-width:900px){
+ .hero{grid-template-columns:1fr}.metrics{grid-template-columns:repeat(2,1fr)}
+ .search{grid-template-columns:1fr 1fr}.options{grid-template-columns:1fr 1fr}
+}
+@media(max-width:600px){
+ .nav{padding:13px 16px}.navnote{display:none}.wrap{padding:20px 14px 50px}.hero-main{padding:24px}
+ h1{letter-spacing:-1px}.metrics{grid-template-columns:1fr 1fr}.search{grid-template-columns:1fr}.options{grid-template-columns:1fr}
+ .toggle{padding-top:5px}.job{grid-template-columns:1fr}.job-top{align-items:flex-start}.score{min-width:68px}
+ .job-actions button{width:100%}.history-row{grid-template-columns:1fr}.resume{align-items:flex-start;flex-direction:column}
+}
 </style>
 </head>
 <body>
-<header><div class="brand">ApplyBot <span class="badge">END-TO-END JOB AUTOMATION</span></div><div class="muted hide-mobile">Source → Match → Apply → Evidence</div></header>
+<header><div class="nav"><div class="logo">Apply<span>Bot</span></div><div class="navnote">Free ATS discovery · local matching · truthful application automation</div></div></header>
 <main class="wrap">
-<section class="grid">
-<div class="card kpi"><span class="muted">Jobs found</span><b id="kFound">0</b></div>
-<div class="card kpi"><span class="muted">Qualified</span><b id="kQualified">0</b></div>
-<div class="card kpi"><span class="muted">Submitted</span><b id="kSubmitted">0</b></div>
-<div class="card kpi"><span class="muted">Needs action</span><b id="kAction">0</b></div>
+<section class="hero">
+ <div class="hero-main">
+  <div class="eyebrow">Job search workspace</div>
+  <h1>Find the right roles.<br>Apply with evidence.</h1>
+  <p>ApplyBot searches its active free ATS dataset inside the app, scores roles against your profile, and only starts application automation when the listing and required information are supported.</p>
+  <div class="pipeline"><span class="step">01 Discover</span><span class="step">02 Match</span><span class="step">03 Review</span><span class="step">04 Apply</span><span class="step">05 Record</span></div>
+ </div>
+ <div class="hero-side">
+  <div><div class="eyebrow">System</div><h3 style="margin:8px 0">Free discovery engine</h3><div class="muted">No RSS, RapidAPI, paid search API or login is required for discovery.</div></div>
+  <div class="health" id="health"><span class="dot"></span>Checking service…</div>
+ </div>
 </section>
 
-<section class="card" style="margin-top:15px">
-<h2 style="margin:0 0 6px">1. Find the jobs you actually want</h2>
-<div class="muted">ApplyBot fetches listings inside the application and shows the exact source, URL, score, matching skills and rejection/qualification reasons.</div>
-<div class="controls" style="margin-top:15px">
-<div class="field"><span>Desired job / keywords</span><input id="query" value="QA Automation Engineer"></div>
-<div class="field"><span>Location</span><input id="location" value="India"></div>
-<div class="field"><span>Minimum match %</span><input id="threshold" type="number" min="1" max="100" value="70"></div>
-<div class="field"><span>Max experience (years)</span><input id="maxExp" type="number" min="0" step=".5" value="2"></div>
-</div>
-<div class="controls">
-<div class="field"><span>Minimum salary (LPA)</span><input id="minSalary" type="number" min="0" step=".5" value="3"></div>
-<div class="field"><span>Remote</span><select id="remote"><option value="false">Any</option><option value="true">Remote only</option></select></div>
-<div class="field"><span>Maximum automatic applications</span><input id="maxApply" type="number" min="1" max="10" value="3"></div>
-<div class="actions" style="margin-top:18px"><button onclick="discover(false)">Search & Score</button><button onclick="discover(true)">Search + Auto Apply</button></div>
-</div>
-<div id="status" class="status">Ready.</div>
-<div class="config" id="config"></div><div class="actions"><input id="resumeFile" type="file" accept=".pdf"><button class="secondary" onclick="uploadResume()">Upload resume</button></div>
+<section class="metrics">
+ <div class="metric"><small>Jobs found</small><b id="kFound">0</b></div>
+ <div class="metric"><small>Qualified</small><b id="kQualified">0</b></div>
+ <div class="metric"><small>Applied</small><b id="kApplied">0</b></div>
+ <div class="metric"><small>Needs action</small><b id="kAction">0</b></div>
 </section>
 
-<section class="card" style="margin-top:15px">
-<div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap">
-<div><h2 style="margin:0 0 5px">2. Results & evidence</h2><div class="muted">Every result records where it came from and why it passed or failed.</div></div>
-<button class="secondary" onclick="loadAll()">Refresh</button>
-</div>
-<div id="jobs" class="jobs"><div class="empty">Run a search to populate this list.</div></div>
+<section class="panel">
+ <div class="panel-head"><div><h2>Search jobs</h2><small>Default profile: QA Automation · SDET · Testing</small></div></div>
+ <div class="search">
+  <div class="field"><label>Role or keywords</label><input id="query" value="QA Automation Engineer"></div>
+  <div class="field"><label>Location</label><input id="location" value="India"></div>
+  <div class="field"><label>Match %</label><input id="threshold" type="number" min="1" max="100" value="65"></div>
+  <div class="field"><label>Max years</label><input id="maxExp" type="number" min="0" step=".5" value="2"></div>
+ </div>
+ <div class="options">
+  <div class="field"><label>Min salary LPA</label><input id="minSalary" type="number" min="0" step=".5" value="3"></div>
+  <div class="field"><label>Auto-apply limit</label><input id="maxApply" type="number" min="1" max="10" value="3"></div>
+  <label class="toggle"><input id="remote" type="checkbox"> Remote only</label>
+ </div>
+ <div class="actions">
+  <button id="searchBtn" onclick="discover(false)">Search & score</button>
+  <button id="autoBtn" class="secondary" onclick="discover(true)">Search + auto-apply</button>
+ </div>
+ <div id="status" class="status">Ready. Search to load current roles.</div>
+ <div class="resume"><div><b>Resume</b><br><small id="resumeState">Checking resume configuration…</small></div><div class="actions" style="margin:0"><input id="resumeFile" type="file" accept=".pdf" style="max-width:230px"><button class="secondary" onclick="uploadResume()">Upload PDF</button></div></div>
+ <div class="config" id="config" style="margin-top:12px"></div>
 </section>
 
-<section class="card" style="margin-top:15px">
-<h2 style="margin:0 0 5px">3. Application history</h2>
-<div class="muted">Submission state is only marked <b>Submitted</b> after the supported ATS workflow completes. CAPTCHA/login challenges are stopped and shown as user action required.</div>
-<div id="history" class="history"></div>
+<section class="panel">
+ <div class="panel-head"><div><h2>Matching results</h2><small>Only roles matching your configured profile are actionable.</small></div><button class="secondary" onclick="loadAll()">Refresh</button></div>
+ <div id="jobs" class="results"><div class="empty">No search has been run yet.</div></div>
+</section>
+
+<section class="panel">
+ <div class="panel-head"><div><h2>Application history</h2><small>Submitted means the application flow completed and returned a submission/success signal.</small></div></div>
+ <div id="history" class="history"><div class="empty">No applications yet.</div></div>
 </section>
 </main>
 <script>
 const $=id=>document.getElementById(id);
-function esc(v){return String(v??'').replace(/[&<>'"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[c]))}
-async function api(path, options={}){
- try{
-  const r=await fetch(path, options);
-  const text=await r.text();
-  let data={}; try{data=JSON.parse(text)}catch(_){data={error:text||('HTTP '+r.status)}}
-  if(!r.ok) throw new Error(data.error||data.details||('HTTP '+r.status));
-  return data;
- }catch(e){throw new Error(e.message||String(e))}
+const esc=v=>String(v??'').replace(/[&<>'"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[c]));
+const val=id=>$(id).value.trim();
+async function api(path,options={}){
+ const r=await fetch(path,options); const t=await r.text(); let x={};
+ try{x=JSON.parse(t)}catch(_){x={error:t||('HTTP '+r.status)}}
+ if(!r.ok) throw new Error(x.error||x.details||('HTTP '+r.status)); return x;
 }
-function val(id){return $(id).value.trim()}
+function setStatus(msg,bad=false){$('status').textContent=msg;$('status').className='status '+(bad?'bad':'good')}
 async function uploadResume(){
- const file=$('resumeFile').files[0];
- if(!file){$('status').textContent='Choose a PDF resume first.';return}
- const fd=new FormData();fd.append('resume',file);
- const r=await fetch('/api/resume',{method:'POST',body:fd});const x=await r.json();
- $('status').textContent=x.message||x.error||'Resume upload finished.';
- await loadConfig();
+ const f=$('resumeFile').files[0]; if(!f){setStatus('Choose a PDF resume first.',true);return}
+ const fd=new FormData();fd.append('resume',f);
+ try{const x=await api('/api/resume',{method:'POST',body:fd});setStatus(x.message||'Resume uploaded.');await loadConfig()}
+ catch(e){setStatus('Resume upload failed: '+e.message,true)}
 }
 async function loadConfig(){
- const c=await api('/api/config');
- let provider='';
  try{
-  const p=await api('/api/provider-check');
-  const providerNames=(c.discovery_sources||{}); 
-  provider='<div class="check ok"><b>Live provider check</b><br>Jobicy: '+esc(p.jobicy&&p.jobicy.ok ? p.jobicy.count+' jobs' : (p.jobicy&&p.jobicy.error||'unavailable'))+'<br>The Muse: '+esc(p.muse&&p.muse.ok ? p.muse.count+' jobs' : (p.muse&&p.muse.error||'unavailable'))+'<br>RemoteOK: '+esc(p.remoteok&&p.remoteok.ok ? p.remoteok.count+' jobs' : (p.remoteok&&p.remoteok.error||'disabled/unavailable'))+'</div>';
+  const [c,p]=await Promise.all([api('/api/config'),api('/api/provider-check')]);
+  $('resumeState').textContent=c.resume_configured?'PDF resume configured':'Upload a PDF resume before applying';
+  $('health').innerHTML='<span class="dot '+(p.ok?'':'bad')+'"></span>'+(p.ok?'Discovery source online · '+Number(p.source.count).toLocaleString()+' jobs available':'Discovery source check failed');
+  $('config').innerHTML=[
+   'Free discovery',
+   'No API key',
+   'No RSS',
+   (c.auto_apply_enabled?'Auto-apply enabled':'Auto-apply disabled'),
+   'ATS: '+(c.supported_browser_adapters||[]).join(', ')
+  ].map(x=>'<span class="config-tag">'+esc(x)+'</span>').join('');
+  $('autoBtn').disabled=!c.auto_apply_enabled;
  }catch(e){
-  provider='<div class="check bad"><b>Live provider check FAILED</b><br>'+esc(e.message)+'</div>';
+  $('health').innerHTML='<span class="dot bad"></span>Service check failed';
+  $('resumeState').textContent='Could not read configuration';
  }
- $('config').innerHTML=[
-  ['Auto apply',c.auto_apply_enabled,c.auto_apply_enabled?'Enabled':'Disabled'],
-  ['Email',c.candidate_email_configured,c.candidate_email_configured?'Configured':'Missing'],
-  ['Phone',c.candidate_phone_configured,c.candidate_phone_configured?'Configured':'Missing'],
-  ['Resume',c.resume_configured,c.resume_configured?'Configured':'Missing'],
-  ['Jobicy provider',c.discovery_sources && c.discovery_sources.Jobicy,(c.discovery_sources && c.discovery_sources.Jobicy_direct_application_urls) ? 'Commercial API · direct ATS URLs' : 'Public API · live JSON listings'],
-  ['India provider',!!(c.discovery_sources && c.discovery_sources.Jobvetta),'Jobvetta '+(c.discovery_sources && c.discovery_sources.Jobvetta?'connected':'API key required')],
-  ['IndianAPI',!!(c.discovery_sources && c.discovery_sources.IndianAPI),'IndianAPI '+(c.discovery_sources && c.discovery_sources.IndianAPI?'connected':'API key optional')],
-  ['Remote provider',!!(c.discovery_sources && c.discovery_sources.RemoteOK),'RemoteOK '+(c.discovery_sources && c.discovery_sources.RemoteOK?'enabled for remote searches':'disabled')],
-  ['LinkedIn',false,'Official API authorization required · scraping disabled'],
-  ['Indeed',false,'Not used for core discovery · no RapidAPI dependency'],
-  ['ATS adapters',true,c.supported_browser_adapters.join(', ')]
- ].map(x=>'<div class="check '+(x[1]?'ok':'bad')+'"><b>'+esc(x[0])+'</b><br>'+esc(x[2])+'</div>').join('')+provider;
+}
+function adapter(url){
+ const u=(url||'').toLowerCase();
+ if(u.includes('greenhouse'))return 'Greenhouse';
+ if(u.includes('lever.co'))return 'Lever';
+ if(u.includes('ashbyhq'))return 'Ashby';
+ if(u.includes('workable'))return 'Workable';
+ if(u.includes('smartrecruiters'))return 'SmartRecruiters';
+ return 'Employer ATS';
 }
 function jobCard(j){
- const reasons=(j.reasons||[]).map(x=>'<div>• '+esc(x)+'</div>').join('');
+ const score=Math.round(Number(j.match_score||j.score||0));
+ const reasons=(j.reasons||[]).map(x=>'<div>• '+esc(x)+'</div>').join('')||'<div>No additional evidence.</div>';
  const skills=(j.matched_skills||[]).map(x=>'<span class="skill">'+esc(x)+'</span>').join('');
- const action=j.status==='ready'||j.status==='application_ready'
-  ? '<button onclick="applyJob('+j.id+')">Auto Apply</button>'
-  : '<button class="secondary" disabled>Not qualified</button>';
- return '<div class="card job">'+
-  '<div><div class="title">'+esc(j.title)+'</div><div class="jobmeta">'+esc(j.company)+' · '+esc(j.location||'Location undisclosed')+'</div>'+
-  '<div class="jobmeta source">Source: '+esc(j.source||'unknown')+'</div><div class="jobmeta">'+(j.source==='Jobicy'?'Jobicy listing':'Listing URL')+': <a href="'+esc(j.source_url||j.url)+'" target="_blank" rel="noopener" style="color:#9ec6ff">'+esc(j.source_url||j.url)+'</a></div><div class="jobmeta">'+(j.source==='Jobicy'?'Application URL':'Source URL')+': <a href="'+esc(j.url)+'" target="_blank" rel="noopener" style="color:#9ec6ff">'+esc(j.url)+'</a></div>'+
-  '<details><summary>Why this result?</summary><div class="reason">'+reasons+'</div><div class="skills">'+skills+'</div></details></div>'+
-  '<div><span class="pill">'+esc(j.status)+'</span><div class="jobmeta">Adapter: '+esc(adapterFor(j.url))+'</div></div>'+
-  '<div class="score">'+Math.round(Number(j.match_score||0))+'%</div>'+
-  '<div><b>'+(j.salary_max||j.salary_min?('₹'+(j.salary_min||'?')+'–'+(j.salary_max||j.salary_min)+' LPA'):'Salary undisclosed')+'</b><div class="jobmeta">'+esc(j.work_mode||'Work mode undisclosed')+'</div></div>'+
-  '<div>'+action+'</div></div>';
+ const qualified=score>=Number(val('threshold')||65);
+ const apply=qualified?'<button onclick="applyJob('+j.id+')">Auto apply</button>':'<button disabled>Below threshold</button>';
+ const url=j.url||j.source_url||'#';
+ return '<article class="job"><div>'+
+  '<div class="job-top"><div><div class="job-title">'+esc(j.title)+'</div><div class="company">'+esc(j.company)+' · '+esc(j.location||'Location not published')+'</div></div><div class="score">'+score+'%</div></div>'+
+  '<div class="meta"><span class="tag">'+esc(adapter(url))+'</span><span class="tag">'+esc(j.work_mode||'Work mode not published')+'</span><span class="tag">'+(j.salary_max||j.salary_min?'Salary published':'Salary not published')+'</span><span class="tag">'+esc(j.status||'new')+'</span></div>'+
+  '<div class="job-links"><a href="'+esc(url)+'" target="_blank" rel="noopener">Open employer application ↗</a></div>'+
+  '<details><summary>Why this score?</summary><div class="reasons">'+reasons+'</div>'+(skills?'<div class="skills">'+skills+'</div>':'')+'</details>'+
+  '</div><div class="job-actions">'+apply+'</div></article>';
 }
-function adapterFor(url){const u=(url||'').toLowerCase();if(u.includes('greenhouse.io'))return 'greenhouse';if(u.includes('lever.co'))return 'lever';return 'unsupported'}
 async function loadJobs(){
  const jobs=await api('/api/jobs');
  $('kFound').textContent=jobs.length;
- $('kQualified').textContent=jobs.filter(j=>Number(j.match_score||0)>=Number(val('threshold')||70)).length;
- $('jobs').innerHTML=jobs.length?jobs.map(jobCard).join(''):'<div class="empty">No jobs found yet.</div>';
+ $('kQualified').textContent=jobs.filter(j=>Number(j.match_score||0)>=Number(val('threshold')||65)).length;
+ $('jobs').innerHTML=jobs.length?jobs.map(jobCard).join(''):'<div class="empty">No matching roles found. Try a broader role, location, or lower match threshold.</div>';
 }
 async function loadHistory(){
  const apps=await api('/api/applications');
- $('kSubmitted').textContent=apps.filter(a=>a.status==='applied').length;
- $('kAction').textContent=apps.filter(a=>['requires_user_action','requires_configuration','failed','unsupported','unsupported_source_policy'].includes(a.status)).length;
- $('history').innerHTML=apps.length?apps.map(a=>'<div class="historyrow"><div><b>'+esc(a.title)+'</b><br>'+esc(a.company)+'</div><div>'+esc(a.status)+'</div><div>'+esc(a.adapter||'—')+'</div><div>'+esc(a.submission_message||'—')+'</div></div>').join(''):'<div class="empty">No application attempts yet.</div>';
+ $('kApplied').textContent=apps.filter(a=>a.status==='applied').length;
+ $('kAction').textContent=apps.filter(a=>['requires_user_action','requires_configuration','failed','unsupported'].includes(a.status)).length;
+ $('history').innerHTML=apps.length?apps.map(a=>'<div class="history-row"><div><b>'+esc(a.title)+'</b><br>'+esc(a.company)+'</div><div>'+esc(a.status)+'</div><div>'+esc(a.adapter||'—')+'</div><div>'+esc(a.submission_message||'—')+'</div></div>').join(''):'<div class="empty">No applications yet.</div>';
 }
 async function loadAll(){await Promise.all([loadConfig(),loadJobs(),loadHistory()])}
 async function discover(auto){
- const payload={query:val('query')||'QA Automation Engineer',location:val('location')||'India',remote:$('remote').value==='true',threshold:Number(val('threshold')||70),max_experience:Number(val('maxExp')||2),min_salary:Number(val('minSalary')||3)};
- $('status').textContent='Querying live job providers for '+(payload.query)+' in '+(payload.location)+' and scoring the returned listings...';
- let x;
- try{x=await api('/api/discover',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)})}
- catch(e){$('status').textContent='Discovery failed: '+e.message;return}
- const provider=(x.sources_checked||[]).map(v=>v.source+': '+v.found+(v.raw_found!=null?' raw/'+v.raw_found:'')+(v.configured?'':' (optional/not configured)')).join(' · ');
- $('status').textContent='Found '+x.items_seen+' relevant listings. '+provider+' · '+x.qualified_jobs+' qualified at '+x.threshold+'%+.'+(x.errors&&x.errors.length?' Provider error: '+x.errors.map(e=>e.error||e.source).join(' | '):'');
- await loadJobs();
- if(auto){
-  const candidates=(x.results||[]).filter(j=>j.qualified && j.job_id).slice(0,Number(val('maxApply')||3));
-  if(!candidates.length){$('status').textContent+=' No qualified jobs were sent to the application step.';return}
-  $('status').textContent+=' Starting '+candidates.length+' automatic application(s)...';
-  let submitted=0, action=0;
-  for(const j of candidates){
-   let z;
-   try{z=await api('/api/jobs/'+j.job_id+'/auto-apply',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({threshold:x.threshold,max_experience:Number(val('maxExp')||2),min_salary:Number(val('minSalary')||3)})})}
-   catch(e){z={status:'failed',message:e.message}}
-   if(z.submitted)submitted++; else if(['requires_user_action','requires_configuration'].includes(z.status))action++;
-  }
-  $('status').textContent+=' Finished: '+submitted+' submitted · '+action+' require user action/configuration.';
+ const payload={query:val('query')||'QA Automation Engineer',location:val('location')||'India',remote:$('remote').checked,threshold:Number(val('threshold')||65),max_experience:Number(val('maxExp')||2),min_salary:Number(val('minSalary')||3)};
+ $('searchBtn').disabled=true;$('autoBtn').disabled=true;
+ setStatus('Searching the free ATS dataset and scoring current roles…');
+ try{
+  const x=await api('/api/discover',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
+  setStatus('Found '+x.items_seen+' listings · '+x.qualified_jobs+' qualified at '+x.threshold+'%+.'+(x.errors?.length?' Some sources returned errors; matching data was still processed.':''));
   await loadAll();
- }
+  if(auto){
+   const candidates=(x.results||[]).filter(j=>j.qualified&&j.job_id).slice(0,Number(val('maxApply')||3));
+   if(!candidates.length){setStatus('Search complete. No qualified jobs were sent to auto-apply.');return}
+   setStatus('Starting '+candidates.length+' application flow(s)…');
+   let done=0,needs=0;
+   for(const j of candidates){
+    try{const z=await api('/api/jobs/'+j.job_id+'/auto-apply',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({threshold:x.threshold,max_experience:payload.max_experience,min_salary:payload.min_salary})});if(z.submitted)done++;else needs++}
+    catch(_){needs++}
+   }
+   setStatus('Application run finished · '+done+' submitted · '+needs+' need review/action.');
+   await loadAll();
+  }
+ }catch(e){setStatus('Search failed: '+e.message,true)}
+ finally{const c=await api('/api/config').catch(()=>({auto_apply_enabled:false}));$('searchBtn').disabled=false;$('autoBtn').disabled=!c.auto_apply_enabled}
 }
 async function applyJob(id){
- const threshold=Number(val('threshold')||70);
- $('status').textContent='Applying to the selected qualified job...';
- let x;
- try{x=await api('/api/jobs/'+id+'/auto-apply',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({threshold,max_experience:Number(val('maxExp')||2),min_salary:Number(val('minSalary')||3)})})}
- catch(e){x={status:'failed',message:e.message}}
- $('status').textContent=x.message||x.error||x.status;
+ setStatus('Starting application flow…');
+ try{
+  const x=await api('/api/jobs/'+id+'/auto-apply',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({threshold:Number(val('threshold')||65),max_experience:Number(val('maxExp')||2),min_salary:Number(val('minSalary')||3)})});
+  setStatus(x.message||x.status);
+ }catch(e){setStatus('Application failed: '+e.message,true)}
  await loadAll();
 }
 loadAll();
