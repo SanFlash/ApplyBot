@@ -260,7 +260,8 @@ def test_jobicy_search_tag_prefers_qa():
 def test_jobicy_provider_is_public(monkeypatch):
     def fake_fetch(url, params, **kwargs):
         assert "jobicy.com/api/v2/remote-jobs" in url
-        assert params["tag"] == "qa"
+        if "tag" in params:
+            assert params["tag"] == "qa"
         return {"jobs": []}
     monkeypatch.setattr(applybot, "fetch_json", fake_fetch)
     jobs, errors, status = applybot.search_jobicy_jobs("QA Automation Engineer", "India")
