@@ -322,3 +322,85 @@ def test_discovery_duplicate_import_does_not_abort_transaction(tmp_path, monkeyp
     assert second.json["qualified_jobs"] == 1
     assert not any(e.get("source") == "database" for e in second.json.get("errors", []))
     assert len(client.get("/api/jobs").json) == 1
+
+
+def test_normalize_indeed_job():
+    jobs = applybot.normalize_indeed_jobs({
+        "jobs": [{
+            "jobKey": "indeed-123",
+            "title": "QA Automation Engineer",
+            "company": "Example India",
+            "location": "Indore, Madhya Pradesh",
+            "remote": "Hybrid work",
+            "salary": {"min": 10000, "max": 14000, "type": "YEARLY", "text": "$10,000 - $14,000 a year"},
+            "snippet": "Playwright Python API testing, 1 year experience.",
+            "applyUrl": "https://www.indeed.com/viewjob?jk=indeed-123",
+            "thirdPartyApplyUrl": "https://example.com/careers/qa-123",
+            "jobTypes": ["Full-time"],
+            "indeedApplyEnabled": True,
+        }]
+    })
+    assert len(jobs) == 1
+    assert jobs[0]["external_id"] == "indeed:indeed-123"
+    assert jobs[0]["source"] == "Indeed RapidAPI"
+    assert jobs[0]["url"] == "https://example.com/careers/qa-123"
+    assert jobs[0]["source_url"].startswith("https://www.indeed.com/")
+    assert jobs[0]["salary_min"] is None  # USD is not treated as INR/LPA by default
+    assert jobs[0]["work_mode"] == "Hybrid"
+
+
+def test_indeed_provider_queries_pages_and_deduplicates(monkeypatch):
+    monkeypatch.setattr(applybot, "INDEED_RAPIDAPI_ENABLED", True)
+    monkeypatch.setattr(applybot, "INDEED_RAPIDAPI_KEY", "test-key")
+    monkeypatch.setattr(applybot, "INDEED_MAX_QUERIES", 2)
+    monkeypatch.setattr(applybot, "INDEED_MAX_PAGES", 1)
+
+    calls = []
+    def fake_fetch(url, params, **kwargs):
+        calls.append(params.copy())
+        return {"jobs": [{
+            "jobKey": "indeed-123",
+            "title": "QA Automation Engineer",
+            "company": "Example India",
+            "location": "Indore, India",
+            "remote": "Hybrid work",
+            "salary": None,
+            "snippet": "Playwright Python API testing, 1 year experience.",
+            "applyUrl": "https://www.indeed.com/viewjob?jk=indeed-123",
+            "thirdPartyApplyUrl": "https://example.com/careers/qa-123",
+            "jobTypes": ["Full-time"],
+        }]}
+
+    monkeypatch.setattr(applybot, "fetch_json", fake_fetch)
+    jobs, errors, status = applybot.search_indeed_jobs("QA Automation Engineer", "India")
+    assert not errors
+    assert len(jobs) == 1
+    assert len(calls) == 2
+    assert all(call["country"] == "IN" for call in calls)
+    assert status[0]["source"] == "Indeed"
+    assert status[0]["configured"] is True
+
+
+def test_jobicy_geo_400_falls_back_to_tag(monkeypatch):
+    from urllib.error import HTTPError
+    calls = []
+
+    def fake_fetch(url, params, **kwargs):
+        calls.append(params.copy())
+        if "geo" in params:
+            raise HTTPError(url, 400, "Bad Request", hdrs=None, fp=None)
+        return {"jobs": [{
+            "id": 1,
+            "jobTitle": "QA Automation Engineer",
+            "companyName": "Example Remote",
+            "jobGeo": "Anywhere",
+            "jobDescription": "Playwright Python API testing",
+            "url": "https://jobicy.com/jobs/1",
+        }]}
+
+    monkeypatch.setattr(applybot, "fetch_json", fake_fetch)
+    jobs, errors, status = applybot.search_jobicy_jobs("QA Automation Engineer", "India")
+    assert len(jobs) == 1
+    assert status[0]["request_mode"] == "tag"
+    assert any("geo" in call for call in calls)
+    assert any("tag" in call and "geo" not in call for call in calls)
