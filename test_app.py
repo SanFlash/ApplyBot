@@ -437,7 +437,8 @@ def test_jobicy_geo_400_falls_back_to_tag(monkeypatch):
     monkeypatch.setattr(applybot, "fetch_json", fake_fetch)
     jobs, errors, status = applybot.search_jobicy_jobs("QA Automation Engineer", "India")
     assert len(jobs) == 1
-    assert status[0]["request_mode"] == "tag"
+    assert "qa:tag" in status[0]["request_mode"]
+    assert "automation:tag" in status[0]["request_mode"]
     assert any("geo" in call for call in calls)
     assert any("tag" in call and "geo" not in call for call in calls)
 
