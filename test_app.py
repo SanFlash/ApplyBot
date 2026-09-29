@@ -425,3 +425,33 @@ def test_indeed_403_is_reported_as_configuration_error(monkeypatch):
     assert status[0]["authorization_ok"] is False
     assert errors[0]["kind"] == "authorization"
     assert len(errors) == 1
+
+
+def test_import_job_items_batch_upsert(monkeypatch, tmp_path):
+    db_path = tmp_path / "applybot-test.db"
+    monkeypatch.setattr(applybot, "SQLITE_DB", str(db_path))
+    monkeypatch.setattr(applybot, "DATABASE_URL", "")
+    monkeypatch.setattr(applybot, "AI_PROVIDER", "none")
+    applybot.init_db()
+
+    job = {
+        "external_id": "job:test-batch",
+        "source": "Test",
+        "title": "QA Automation Engineer",
+        "company": "Example Co",
+        "location": "India",
+        "work_mode": "Hybrid",
+        "url": "https://example.com/job/test-batch",
+        "source_url": "https://example.com/job/test-batch",
+        "description": "QA Automation Engineer with Python Playwright and 1 year experience.",
+    }
+    first = applybot.import_job_items([job])
+    second = applybot.import_job_items([job])
+    assert len(first) == 1
+    assert len(second) == 1
+    c = applybot.db()
+    try:
+        row = c.execute("SELECT COUNT(*) AS n FROM jobs WHERE external_id=?", ("job:test-batch",)).fetchone()
+        assert row["n"] == 1
+    finally:
+        c.close()
