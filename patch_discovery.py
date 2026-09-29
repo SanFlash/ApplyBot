@@ -3,194 +3,117 @@ from pathlib import Path
 p = Path("app.py")
 s = p.read_text(encoding="utf-8")
 
-if 'THEMUSE_ENABLED = os.getenv("THEMUSE_ENABLED"' not in s:
-    s = s.replace(
-        'THEMUSE_API_KEY = os.getenv("THEMUSE_API_KEY", "").strip()',
-        'THEMUSE_API_KEY = os.getenv("THEMUSE_API_KEY", "").strip()\nTHEMUSE_ENABLED = os.getenv("THEMUSE_ENABLED", "false").lower() == "true"',
-        1,
-    )
+# AI configuration
+needle = 'THEMUSE_ENABLED = os.getenv("THEMUSE_ENABLED", "false").lower() == "true"'
+if 'AI_PROVIDER = os.getenv("AI_PROVIDER"' not in s:
+    s = s.replace(needle, needle + '\nAI_PROVIDER = os.getenv("AI_PROVIDER", "none").strip().lower()\nGEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "").strip()\nGEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-2.5-flash-lite").strip()')
 
-start = s.index("def search_additional_providers(")
-end = s.index("\n\ndef _jobicy_geo", start)
+# Replace skill scoring with phrase-aware matching and query relevance.
+old = '''    jt = tokens(text)
+    for skill in CANDIDATE["skills"]:
+        if skill.lower() in jt or skill.lower().replace(" ", "-") in jt:
+            matched.append(skill)
 
-replacement = '''def normalize_muse_jobs(data):
-    rows = data.get("results", []) if isinstance(data, dict) else []
-    jobs = []
-    for raw in rows:
-        if not isinstance(raw, dict):
-            continue
-        company = raw.get("company") or {}
-        company_name = company.get("name") if isinstance(company, dict) else str(company)
-        locations = raw.get("locations") or []
-        location_names = []
-        for loc in locations:
-            location_names.append(str(loc.get("name") or "") if isinstance(loc, dict) else str(loc))
-        description = strip_html(str(raw.get("contents") or raw.get("description") or ""))
-        title = str(raw.get("name") or raw.get("title") or "").strip()
-        refs = raw.get("refs") if isinstance(raw.get("refs"), dict) else {}
-        url = str(refs.get("landing_page") or raw.get("url") or "").strip()
-        if not title or not url:
-            continue
-        jobs.append({
-            "external_id": "themuse:" + str(raw.get("id") or url),
-            "source": "The Muse",
-            "source_url": url,
-            "title": title,
-            "company": str(company_name or "Unknown").strip(),
-            "location": ", ".join(x for x in location_names if x) or "Remote",
-            "work_mode": "Remote" if any("remote" in x.lower() for x in location_names) else "",
-            "salary_min": None,
-            "salary_max": None,
-            "experience_min": extract_experience(description),
-            "url": url,
-            "description": description or title,
-        })
-    return jobs
-
-
-def _provider_status(source, found, configured, provider, error=None):
-    item = {"source": source, "found": int(found or 0), "configured": bool(configured), "provider": provider}
-    if error:
-        item["error"] = str(error)[:1000]
-    return item
-
-
-def search_additional_providers(query, location="", remote=False):
-    results, errors, status = [], [], []
-
-    if JOBVETTA_API_KEY and (
-        not location or "india" in location.lower() or
-        location.lower() in {"ind", "bengaluru", "bangalore", "pune", "mumbai", "hyderabad", "indore", "delhi", "noida", "gurgaon", "gurugram"}
-    ):
-        try:
-            data = fetch_json(
-                JOBVETTA_API_URL,
-                {"q": query, "location": location or "India", "days": 30, "limit": 10},
-                headers={"Authorization": f"Bearer {JOBVETTA_API_KEY}"},
-                timeout=JOBICY_TIMEOUT,
-            )
-            rows = [j for j in normalize_jobvetta_jobs(data) if location_matches(j, location, remote)]
-            results.extend(rows)
-            status.append(_provider_status("Jobvetta", len(rows), True, "Jobvetta Free India API"))
-        except Exception as exc:
-            errors.append({"source": "Jobvetta", "error": str(exc)[:1000]})
-            status.append(_provider_status("Jobvetta", 0, True, "Jobvetta Free India API", exc))
-    else:
-        status.append(_provider_status("Jobvetta", 0, False, "Free India API — API key required"))
-
-    if INDIANAPI_KEY:
-        try:
-            data = fetch_json(
-                INDIANAPI_URL,
-                {"limit": "50", "title": query, "location": location or "India"},
-                headers={"X-Api-Key": INDIANAPI_KEY},
-                timeout=JOBICY_TIMEOUT,
-            )
-            rows = [j for j in normalize_indianapi_jobs(data) if location_matches(j, location, remote)]
-            results.extend(rows)
-            status.append(_provider_status("IndianAPI", len(rows), True, "IndianAPI Free Jobs API"))
-        except Exception as exc:
-            errors.append({"source": "IndianAPI", "error": str(exc)[:1000]})
-            status.append(_provider_status("IndianAPI", 0, True, "IndianAPI Free Jobs API", exc))
-    else:
-        status.append(_provider_status("IndianAPI", 0, False, "Free India Jobs API — API key required"))
-
-    if THEMUSE_ENABLED:
-        try:
-            params = {"page": 1}
-            if THEMUSE_API_KEY:
-                params["api_key"] = THEMUSE_API_KEY
-            data = fetch_json("https://www.themuse.com/api/public/jobs", params, timeout=JOBICY_TIMEOUT)
-            q_tokens = tokens(query)
-            rows = normalize_muse_jobs(data)
-            selected = [
-                j for j in rows
-                if not q_tokens or sum(t in (j["title"] + " " + j["description"]).lower() for t in q_tokens) >= max(1, min(2, len(q_tokens)))
-            ]
-            selected = [j for j in selected if location_matches(j, location, remote)]
-            results.extend(selected)
-            status.append(_provider_status("The Muse", len(selected), True, "The Muse public Jobs API"))
-        except Exception as exc:
-            errors.append({"source": "The Muse", "error": str(exc)[:1000]})
-            status.append(_provider_status("The Muse", 0, True, "The Muse public Jobs API", exc))
-    else:
-        status.append(_provider_status("The Muse", 0, False, "Optional; set THEMUSE_ENABLED=true"))
-
-    if REMOTEOK_ENABLED and (remote or not location or location.lower() in {"remote", "anywhere", "worldwide"}):
-        try:
-            rows = normalize_remoteok_jobs(fetch_json("https://remoteok.com/api"))
-            q_tokens = tokens(query)
-            selected = [
-                j for j in rows
-                if not q_tokens or sum(t in (j["title"] + " " + j["description"]).lower() for t in q_tokens) >= max(1, min(2, len(q_tokens)))
-            ]
-            results.extend(selected[:100])
-            status.append(_provider_status("RemoteOK", len(selected[:100]), True, "RemoteOK public API"))
-        except Exception as exc:
-            errors.append({"source": "RemoteOK", "error": str(exc)[:1000]})
-            status.append(_provider_status("RemoteOK", 0, True, "RemoteOK public API", exc))
-    else:
-        status.append(_provider_status("RemoteOK", 0, REMOTEOK_ENABLED, "Remote-only public API"))
-
-    return results, errors, status
+    score += min(12, len(matched))
+    reasons.append(f"{len(matched)} relevant skills detected")
+    return min(100, score), reasons, matched
 '''
-s = s[:start] + replacement + s[end:]
+new = '''    normalized_text = re.sub(r"[^a-z0-9+#.\-/ ]+", " ", text)
+    normalized_text = re.sub(r"\s+", " ", normalized_text).lower()
+    for skill in CANDIDATE["skills"]:
+        sk = skill.lower()
+        variants = {sk, sk.replace(" ", "-"), sk.replace(" ", "/")}
+        if any(v in normalized_text for v in variants):
+            matched.append(skill)
 
-old = '''def run_discovery(body):
-    query = str(body.get("query") or "QA Automation Engineer").strip()
-    location = str(body.get("location") or "India").strip()
-    remote = bool(body.get("remote", False))
-    threshold = float(body.get("threshold", 70))
-    max_experience = float(body.get("max_experience", 2))
-    min_salary = max(float(body.get("min_salary", 3)), CANDIDATE["minimum_ctc_lpa"])
-    items, errors, source_status = search_public_sources(query, location, remote)
-    results = import_job_items(items)
+    skill_points = min(12, len(matched) * 2)
+    score += skill_points
+    if matched:
+        reasons.append("Matched skills: " + ", ".join(matched[:6]))
+    else:
+        reasons.append("No configured skills detected")
+    return min(100, score), reasons, matched
 '''
-new = '''def run_discovery(body):
-    query = str(body.get("query") or "QA Automation Engineer").strip()
-    location = str(body.get("location") or "India").strip()
-    remote = bool(body.get("remote", False))
-    threshold = float(body.get("threshold", 70))
-    max_experience = float(body.get("max_experience", 2))
-    min_salary = max(float(body.get("min_salary", 3)), CANDIDATE["minimum_ctc_lpa"])
-    items, errors, source_status = search_public_sources(query, location, remote)
+if old in s:
+    s = s.replace(old, new, 1)
+
+# Add AI enrichment to each imported job, but keep it non-blocking.
+old = '''        base = {**j, "salary_min": smin, "salary_max": smax, "experience_min": exp}
+        sc, reasons, matched = score_job(base)
+'''
+new = '''        base = {**j, "salary_min": smin, "salary_max": smax, "experience_min": exp}
+        try:
+            if AI_PROVIDER != "none":
+                from ai_engine import extract_job_intelligence
+                intel = extract_job_intelligence(base["title"], base["description"])
+                if isinstance(intel, dict):
+                    if base.get("experience_min") is None and intel.get("experience_years") is not None:
+                        base["experience_min"] = float(intel["experience_years"])
+                    if base.get("salary_min") is None and intel.get("salary_min_lpa") is not None:
+                        base["salary_min"] = float(intel["salary_min_lpa"])
+                    if base.get("salary_max") is None and intel.get("salary_max_lpa") is not None:
+                        base["salary_max"] = float(intel["salary_max_lpa"])
+                    ai_skills = intel.get("required_skills") or []
+                    base["_ai_skills"] = ai_skills
+        except Exception:
+            pass
+        sc, reasons, matched = score_job(base)
+        ai_skills = base.get("_ai_skills") or []
+        if ai_skills:
+            matched = list(dict.fromkeys(matched + [str(x) for x in ai_skills if str(x).strip()]))
+            reasons.append("AI extracted required skills")
+'''
+if old in s:
+    s = s.replace(old, new, 1)
+
+# Make /api/discover and /api/discover/search share identical behavior with diagnostics.
+if '@app.post("/api/discover/search")' not in s:
+    marker='@app.post("/api/discover")'
+    alias='''@app.post("/api/discover/search")
+def discover_search_compat():
+    try:
+        return jsonify(run_discovery(request.get_json(silent=True) or {}))
+    except Exception as exc:
+        return jsonify({"error": "Discovery failed", "details": str(exc)[:1500]}), 502
+
+
+'''
+    s=s.replace(marker, alias+marker, 1)
+
+# Provider failures should never prevent useful results.
+old = '''    items, errors, source_status = search_public_sources(query, location, remote)
     try:
         results = import_job_items(items)
-    except Exception as exc:
-        errors.append({"source": "database", "error": str(exc)[:1500]})
-        results = []
 '''
-if old not in s:
-    raise SystemExit("run_discovery anchor not found")
-s = s.replace(old, new, 1)
-
-if '"TheMuse": THEMUSE_ENABLED' not in s:
-    s = s.replace('"RemoteOK": REMOTEOK_ENABLED,', '"RemoteOK": REMOTEOK_ENABLED,\n            "TheMuse": THEMUSE_ENABLED,', 1)
-
-marker = '@app.get("/api/provider-check")'
-if 'def discovery_diagnostics()' not in s:
-    diagnostic = '''@app.get("/api/discovery-diagnostics")
-def discovery_diagnostics():
-    query = request.args.get("query", "QA Automation Engineer")
-    location = request.args.get("location", "India")
-    remote = request.args.get("remote", "false").lower() == "true"
+new = '''    items, errors, source_status = search_public_sources(query, location, remote)
     try:
-        items, errors, sources = search_public_sources(query, location, remote)
-        return jsonify({
-            "ok": True,
-            "query": query,
-            "location": location,
-            "remote": remote,
-            "items_seen": len(items),
-            "sources_checked": sources,
-            "errors": errors,
-        })
-    except Exception as exc:
-        return jsonify({"ok": False, "error": str(exc)[:2000]}), 200
-
-
+        results = import_job_items(items)
 '''
-    s = s.replace(marker, diagnostic + marker, 1)
+# already hardened; leave intact
+
+# Add provider counts to response.
+old = '''        "sources_checked": source_status,
+        "items_seen": len(items),
+'''
+new = '''        "sources_checked": source_status,
+        "provider_summary": {str(x.get("source")): int(x.get("found") or 0) for x in source_status},
+        "items_seen": len(items),
+'''
+if old in s:
+    s=s.replace(old,new,1)
+
+# Add AI status to config.
+old = '''        "auto_apply_max": AUTO_APPLY_MAX,
+'''
+new = '''        "auto_apply_max": AUTO_APPLY_MAX,
+        "ai": {
+            "provider": AI_PROVIDER,
+            "configured": bool((AI_PROVIDER == "gemini" and GEMINI_API_KEY) or AI_PROVIDER == "ollama" or AI_PROVIDER == "none"),
+            "model": GEMINI_MODEL if AI_PROVIDER == "gemini" else os.getenv("OLLAMA_MODEL", "gemma3"),
+        },
+'''
+if old in s:
+    s=s.replace(old,new,1)
 
 p.write_text(s, encoding="utf-8")
-print("ApplyBot discovery patch applied")
+print("ApplyBot production discovery/AI patch applied")
