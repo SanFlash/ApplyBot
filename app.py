@@ -705,7 +705,7 @@ def location_matches(job, location, remote=False):
         return (not remote) or job.get("work_mode", "").lower() == "remote"
     if requested in {"india", "ind"}:
         india_terms = ["india", "indian", "bangalore", "bengaluru", "pune", "hyderabad", "mumbai", "delhi", "noida", "gurugram", "gurgaon", "chennai", "indore"]
-        matched = any(x in text for x in india_terms) or "apac" in location_text or "anywhere" in location_text
+        matched = any(x in text for x in india_terms) or any(x in location_text for x in ("apac", "asia", "south asia", "anywhere", "worldwide", "global"))
         return matched and (not remote or job.get("work_mode", "").lower() == "remote")
     matched = requested in text or "anywhere" in location_text or "worldwide" in location_text
     return matched and (not remote or job.get("work_mode", "").lower() == "remote")
@@ -838,7 +838,14 @@ def run_discovery(body):
         row = c.execute("SELECT experience_min,salary_max FROM jobs WHERE id=?", (r.get("job_id"),)).fetchone()
         exp_ok = not row or row["experience_min"] is None or float(row["experience_min"]) <= max_experience
         salary_ok = not row or row["salary_max"] is None or float(row["salary_max"]) >= min_salary
-        if float(r.get("score") or 0) >= threshold and exp_ok and salary_ok:
+        threshold_ok = float(r.get("score") or 0) >= threshold
+        r["qualified"] = bool(threshold_ok and exp_ok and salary_ok)
+        r["qualification_reason"] = (
+            "Qualified" if r["qualified"]
+            else ("Below match threshold" if not threshold_ok
+                  else ("Experience exceeds limit" if not exp_ok else "Published salary is below minimum"))
+        )
+        if r["qualified"]:
             qualified.append(r)
     c.close()
 
@@ -861,12 +868,18 @@ def run_discovery(body):
 
 @app.post("/api/discover/search")
 def discover_search():
-    return jsonify(run_discovery(request.get_json(silent=True) or {}))
+    try:
+        return jsonify(run_discovery(request.get_json(silent=True) or {}))
+    except Exception as exc:
+        return jsonify({"error": "Discovery failed", "details": str(exc)[:1500]}), 502
 
 
 @app.post("/api/discover")
 def discover():
-    return jsonify(run_discovery(request.get_json(silent=True) or {}))
+    try:
+        return jsonify(run_discovery(request.get_json(silent=True) or {}))
+    except Exception as exc:
+        return jsonify({"error": "Discovery failed", "details": str(exc)[:1500]}), 502
 
 
 @app.post("/api/resume")
@@ -888,7 +901,7 @@ def provider_check():
     try:
         data = fetch_json(JOBICY_API_URL, {"count": 5, "tag": "qa"}, headers={}, timeout=JOBICY_TIMEOUT)
         jobs = normalize_jobicy_jobs(data)
-        result["jobicy"] = {"ok": True, "count": len(jobs), "sample_titles": [j["title"] for j in jobs[:5]]}
+        result["jobicy"] = {"ok": True, "count": len(jobs), "sample_titles": [j["title"] for j in jobs[:5]], "sample_locations": [j["location"] for j in jobs[:5]], "endpoint": JOBICY_API_URL}
     except Exception as exc:
         result["jobicy"] = {"ok": False, "error": str(exc)[:1000]}
     try:
@@ -933,13 +946,23 @@ def config_status():
 
 @app.get("/api/jobs")
 def jobs():
-    c = db()
-    if ENABLE_LEGACY_SOURCES:
-        rows = c.execute("SELECT * FROM jobs ORDER BY match_score DESC, discovered_at DESC").fetchall()
-    else:
-        rows = c.execute("SELECT * FROM jobs WHERE source=? OR source LIKE 'user-assisted%' ORDER BY match_score DESC, discovered_at DESC", ("Jobicy",)).fetchall()
-    c.close()
-    return jsonify([dict(r) for r in rows])
+    try:
+        c = db()
+        if ENABLE_LEGACY_SOURCES:
+            rows = c.execute("SELECT * FROM jobs ORDER BY match_score DESC, discovered_at DESC").fetchall()
+        else:
+            rows = c.execute("SELECT * FROM jobs WHERE source=? OR source LIKE 'user-assisted%' ORDER BY match_score DESC, discovered_at DESC", ("Jobicy",)).fetchall()
+        c.close()
+        payload = []
+        for row in rows:
+            item = dict(row)
+            item["reasons"] = [x.strip() for x in (item.get("match_reasons") or "").split(";") if x.strip()]
+            try: item["matched_skills"] = json.loads(item.get("matched_skills") or "[]")
+            except Exception: item["matched_skills"] = []
+            payload.append(item)
+        return jsonify(payload)
+    except Exception as exc:
+        return jsonify({"error": "Could not load jobs", "details": str(exc)[:1000]}), 500
 
 
 @app.post("/api/jobs/import")
