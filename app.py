@@ -1677,8 +1677,16 @@ def _fill_label(page, patterns, value):
     return False
 
 
-def resolve_jobicy_application_url(job_url):
-    if not job_url or "jobicy.com" not in (urlparse(job_url).hostname or "").lower():
+def resolve_application_url(job_url):
+    """Resolve a public job-detail page to its employer/ATS application URL."""
+    if not job_url:
+        return job_url, None
+    host = (urlparse(job_url).hostname or "").lower()
+    supported_hosts = (
+        "greenhouse.io", "lever.co", "workable.com", "ashbyhq.com",
+        "smartrecruiters.com"
+    )
+    if any(x in host for x in supported_hosts):
         return job_url, None
     try:
         from playwright.sync_api import sync_playwright
@@ -1688,31 +1696,39 @@ def resolve_jobicy_application_url(job_url):
             page.goto(job_url, wait_until="domcontentloaded", timeout=30000)
             page.wait_for_timeout(800)
             links = page.locator("a[href]")
-            for i in range(links.count()):
+            for i in range(min(links.count(), 250)):
                 a = links.nth(i)
                 try:
                     href = a.get_attribute("href") or ""
                     label = (a.inner_text() or "").strip().lower()
-                    host = (urlparse(href).hostname or "").lower()
-                    if href.startswith("http") and "jobicy.com" not in host and re.search(r"\b(apply|application|apply now|career|careers)\b", label, re.I):
-                        browser.close()
-                        return href, "Resolved external employer application URL from Jobicy"
+                    host2 = (urlparse(href).hostname or "").lower()
+                    if not href.startswith("http") or href == job_url:
+                        continue
+                    if re.search(r"\\b(apply|application|apply now|submit application|careers)\\b", label, re.I):
+                        if host2 and host2 != host:
+                            browser.close()
+                            return href, "Resolved employer application URL"
                 except Exception:
                     continue
             browser.close()
     except Exception as exc:
-        return job_url, "Jobicy application-link resolution failed: " + str(exc)[:400]
-    return job_url, "Jobicy listing did not expose a supported external application URL"
+        return job_url, "Application-link resolution failed: " + str(exc)[:400]
+    return job_url, "No supported employer application URL found on the listing"
 
+
+# Backward-compatible alias.
+def resolve_jobicy_application_url(job_url):
+    return resolve_application_url(job_url)
 
 def submit_with_browser(job, answers):
     application_url = job["url"]
     resolution_message = None
-    if job.get("source") == "Jobicy" and not JOBICY_API_KEY:
-        application_url, resolution_message = resolve_jobicy_application_url(job["url"])
+    adapter = detect_application_adapter(application_url)
+    if adapter == "unsupported":
+        application_url, resolution_message = resolve_application_url(application_url)
         if application_url != job["url"]:
             job = {**job, "url": application_url}
-    adapter = detect_application_adapter(application_url)
+            adapter = detect_application_adapter(application_url)
     if job.get("source") == "Remotive":
         return {"status": "unsupported_source_policy", "adapter": adapter,
                 "message": "Remotive public API terms do not permit submitting its listings to third-party sites. This listing can be reviewed, but ApplyBot will not auto-submit it."}
@@ -1740,6 +1756,22 @@ def submit_with_browser(job, answers):
             page = browser.new_page()
             page.goto(job["url"], wait_until="domcontentloaded", timeout=45000)
             page.wait_for_timeout(1500)
+
+            # Some ATS pages land on a job-detail screen first. Follow an
+            # explicit Apply button before inspecting fields.
+            email_fields = page.locator('input[type="email"], input[name*="email" i]')
+            file_fields = page.locator('input[type="file"]')
+            if not email_fields.count() and not file_fields.count():
+                apply_link = page.get_by_role("link", name=re.compile(r"apply now|apply|start application", re.I)).last
+                apply_button = page.get_by_role("button", name=re.compile(r"apply now|apply|start application", re.I)).last
+                target = apply_link if apply_link.count() else apply_button
+                if target.count() and target.is_visible():
+                    try:
+                        target.click()
+                        page.wait_for_timeout(1800)
+                    except Exception:
+                        pass
+
             body_text = page.locator("body").inner_text(timeout=10000)
             challenge = page.locator(
                 'iframe[src*="recaptcha"], iframe[src*="hcaptcha"], [id*="captcha"], [class*="captcha"]'
