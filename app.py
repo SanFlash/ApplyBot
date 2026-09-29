@@ -978,52 +978,122 @@ def _jobicy_search_tag(query):
     return words[0] if words else "qa"
 
 
+def _jobicy_search_tags(query):
+    """Return a small set of role-specific tags to improve recall without broad scraping."""
+    q = (query or "").lower()
+    tags = [_jobicy_search_tag(query)]
+    if any(x in q for x in ("qa", "quality", "test", "tester", "sdet", "automation")):
+        tags.extend(["automation", "sdet", "tester"])
+    else:
+        tags.extend([w for w in re.findall(r"[a-z]+", q) if len(w) >= 4 and w not in STOPWORDS])
+    unique = []
+    for tag in tags:
+        if tag and tag not in unique:
+            unique.append(tag)
+    return unique[:3]
+
+
+def job_matches_query(job, query):
+    """Require actual query/role relevance before a listing enters ApplyBot results."""
+    q = (query or "").strip().lower()
+    if not q:
+        return True
+    title = (job.get("title") or "").lower()
+    text = (title + " " + (job.get("description") or "")).lower()
+    q_tokens = tokens(q)
+    title_tokens = tokens(title)
+
+    # Exact configured role families get priority.
+    for role, keywords in ROLE_KEYWORDS.items():
+        if any(k in title for k in keywords) and (
+            role.lower() in q or q in role.lower() or
+            any(k in q for k in keywords)
+        ):
+            return True
+
+    if len(q_tokens) == 1:
+        return next(iter(q_tokens)) in text
+
+    overlap = len(q_tokens & title_tokens)
+    text_overlap = sum(1 for token in q_tokens if token in text)
+    required_title = max(2, (len(q_tokens) + 1) // 2)
+    return overlap >= required_title or text_overlap >= max(2, min(3, len(q_tokens)))
+
+
 def search_jobicy_jobs(query, location="", remote=False):
-    """Fetch live Jobicy data and apply requested location matching locally."""
-    tag = _jobicy_search_tag(query)
+    """Fetch live Jobicy data, query-filter it, and apply requested location matching."""
     location_text = (location or "").strip()
     geo = _jobicy_geo(location_text)
     if remote and not geo:
         geo = "anywhere"
-    base_params = {"count": JOBICY_COUNT, "tag": tag}
-    if geo:
-        base_params["geo"] = geo
+    tags = _jobicy_search_tags(query)
     headers = {}
     if JOBICY_API_KEY:
         headers["Authorization"] = f"Bearer {JOBICY_API_KEY}"
-    attempts = []
-    if geo:
-        attempts.append(("tag+geo", {"count": JOBICY_COUNT, "tag": tag, "geo": geo}))
-    attempts.append(("tag", {"count": JOBICY_COUNT, "tag": tag}))
-    if geo:
-        attempts.append(("geo", {"count": JOBICY_COUNT, "geo": geo}))
-    attempts.append(("global", {"count": JOBICY_COUNT}))
-    rows, errors, successful_mode = [], [], None
-    for mode, params in attempts:
-        try:
-            data = fetch_json(JOBICY_API_URL, params, headers=headers, timeout=JOBICY_TIMEOUT)
-            candidate_rows = normalize_jobicy_jobs(data)
-            rows = candidate_rows
-            successful_mode = mode
-            if candidate_rows or mode == "global":
+
+    all_rows = []
+    errors = []
+    modes = []
+    for tag in tags:
+        attempts = []
+        if geo:
+            attempts.append(("tag+geo", {"count": min(JOBICY_COUNT, 100), "tag": tag, "geo": geo}))
+        attempts.append(("tag", {"count": min(JOBICY_COUNT, 100), "tag": tag}))
+        rows_for_tag = []
+        successful_mode = None
+        for mode, params in attempts:
+            try:
+                data = fetch_json(JOBICY_API_URL, params, headers=headers, timeout=JOBICY_TIMEOUT)
+                rows_for_tag = normalize_jobicy_jobs(data)
+                successful_mode = mode
                 break
+            except Exception as exc:
+                errors.append(f"{tag}/{mode}: {str(exc)[:500]}")
+        if successful_mode:
+            modes.append(f"{tag}:{successful_mode}")
+            all_rows.extend(rows_for_tag)
+
+    # If every tag request failed, use one global request as a final recovery.
+    if not all_rows and errors:
+        try:
+            data = fetch_json(
+                JOBICY_API_URL, {"count": min(JOBICY_COUNT, 200)},
+                headers=headers, timeout=JOBICY_TIMEOUT
+            )
+            all_rows = normalize_jobicy_jobs(data)
+            modes.append("global")
         except Exception as exc:
-            errors.append(f"{mode}: {str(exc)[:500]}")
+            errors.append(f"global: {str(exc)[:500]}")
+
+    unique = []
+    seen = set()
+    for job in all_rows:
+        key = job.get("external_id") or job_fingerprint(job)
+        if key in seen:
             continue
-    filtered = []
-    for job in rows:
+        seen.add(key)
         job["_query"] = query
-        if location_matches(job, location_text, remote):
-            filtered.append(job)
+        if job_matches_query(job, query) and location_matches(job, location_text, remote):
+            unique.append(job)
+        if len(unique) >= min(200, JOBICY_COUNT):
+            break
+
     provider = {
-        "source": "Jobicy", "found": len(filtered), "raw_found": len(rows), "configured": True,
+        "source": "Jobicy",
+        "found": len(unique),
+        "raw_found": len(all_rows),
+        "configured": True,
         "provider": "Jobicy Commercial API" if JOBICY_API_KEY else "Jobicy Public REST API",
-        "direct_application_urls": bool(JOBICY_API_KEY), "tag": tag,
-        "geo": geo or "anywhere", "request_mode": successful_mode or "failed"
+        "direct_application_urls": bool(JOBICY_API_KEY),
+        "tags": tags,
+        "geo": geo or "anywhere",
+        "request_mode": ",".join(modes) if modes else "failed",
+        "query_filtered": True,
     }
     if errors:
         provider["fallback_notes"] = errors[:4]
-    return filtered, ([{"source": "Jobicy", "error": "; ".join(errors[:3])}] if errors and not rows else []), [provider]
+    provider_errors = [{"source": "Jobicy", "error": "; ".join(errors[:3])}] if errors and not unique else []
+    return unique, provider_errors, [provider]
 
 
 
