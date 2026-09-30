@@ -130,7 +130,7 @@ async function loadHistory(){
  const apps=await api('/api/applications');
  $('kApplied').textContent=apps.filter(a=>a.status==='applied').length;
  $('kAction').textContent=apps.filter(a=>['requires_user_action','requires_configuration','failed','unsupported'].includes(a.status)).length;
- $('history').innerHTML=apps.length?apps.map(a=>{const action=a.status==='requires_user_action'&&a.application_url?'<button class="secondary" onclick="continueVerification('+a.job_id+',\''+String(a.application_url).replace(/'/g,'')+'\')">Continue after verification</button>':'';return '<div class="history-row"><div><b>'+esc(a.title)+'</b><br>'+esc(a.company)+'</div><div>'+esc(a.status)+'</div><div>'+esc(a.adapter||'—')+'</div><div>'+esc(a.submission_message||'—')+' '+action+'</div></div>';}).join(''):'<div class="empty">No applications yet.</div>';
+ $('history').innerHTML=apps.length?apps.map(a=>{const action=a.status==='requires_user_action'&&a.application_url?'<div class="actions" style="margin:0"><button class="secondary" onclick="openVerification('+a.job_id+',\''+String(a.application_url).replace(/'/g,'')+'\')">Open verification</button><button onclick="continueVerification('+a.job_id+')">Continue after verification</button></div>':'';return '<div class="history-row"><div><b>'+esc(a.title)+'</b><br>'+esc(a.company)+'</div><div>'+esc(a.status)+'</div><div>'+esc(a.adapter||'—')+'</div><div>'+esc(a.submission_message||'—')+' '+action+'</div></div>';}).join(''):'<div class="empty">No applications yet.</div>';
 }
 async function loadAll(){await Promise.all([loadConfig(),loadJobs(),loadHistory()])}
 async function discover(auto){
@@ -157,16 +157,16 @@ async function discover(auto){
  finally{const c=await api('/api/config').catch(()=>({auto_apply_enabled:false}));$('searchBtn').disabled=false;$('autoBtn').disabled=!c.auto_apply_enabled}
 }
 function openEmployer(url){if(!url||url==='#')return;const w=window.open(url,'_blank','noopener,noreferrer');if(!w)setStatus('Your browser blocked the employer tab. Allow pop-ups for ApplyBot.',true)}
-async function continueVerification(id,url){
- openEmployer(url);
- setStatus('Employer page opened. Complete the human verification there, then return here and continue the application flow.');
+async function continueVerification(id){
+ setStatus('Retrying the supported application flow after verification…');
  try{
   const x=await api('/api/jobs/'+id+'/continue-after-verification',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({threshold:Number(val('threshold')||65),max_experience:Number(val('maxExp')||2),min_salary:Number(val('minSalary')||3)})});
-  if(x.status==='requires_user_action'&&x.application_url)openEmployer(x.application_url);
-  setStatus(x.message||x.status,x.status==='failed');
+  if(x.status==='requires_user_action'&&x.application_url){openEmployer(x.application_url);setStatus('Verification is still required. Complete it in the employer tab, then retry again.')}
+  else setStatus(x.message||x.status,x.status==='failed');
  }catch(e){setStatus('Continue failed: '+e.message,true)}
  await loadAll();
 }
+function openVerification(id,url){openEmployer(url);setStatus('Employer verification page opened. Complete the CAPTCHA/human check there, then return and press Continue after verification.');}
 async function applyJob(id){
  setStatus('Starting application flow…');
  try{
