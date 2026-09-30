@@ -68,7 +68,11 @@ def resume_file_path():
 app = Flask(__name__, static_folder="web", static_url_path="")
 
 CANDIDATE = {
+    # Private contact fields are read from environment variables so the public
+    # repository never contains the candidate's personal contact data.
     "name": "Satyendra Kumar Namdeo",
+    "email": os.getenv("CANDIDATE_EMAIL", "").strip(),
+    "phone": os.getenv("CANDIDATE_PHONE", "").strip(),
     "title": "QA Engineer | QA Automation | SDET | AI-Assisted QA",
     "experience_years": 1.0,
     "current_ctc_lpa": 2.2,
@@ -76,32 +80,60 @@ CANDIDATE = {
     "expected_ctc_max_lpa": 5.0,
     "minimum_ctc_lpa": 3.0,
     "notice_period_days": 45,
-    "locations": ["India", "Indore", "Bangalore", "Pune", "Remote"],
-    "work_modes": ["Hybrid"],
+    "locations": ["India", "Bhopal", "Indore", "Bengaluru", "Pune", "Remote"],
+    "work_modes": ["Hybrid", "Remote"],
     "roles_primary": [
-        "QA Automation Engineer", "Automation Tester", "SDET",
-        "Software Tester", "Test Engineer", "AI Assisted QA", "AI Assisted Tester"
+        "QA Engineer", "QA Automation Engineer", "QA Automation", "Automation Tester",
+        "SDET", "Software Tester", "Test Engineer", "Quality Assurance Engineer",
+        "AI-Assisted QA", "AI-Assisted Tester"
     ],
-    "roles_secondary": ["Frontend Designer", "AI-Assisted Developer", "Vibe Coding"],
+    "roles_secondary": ["QA Analyst", "Quality Analyst", "AI-Assisted Developer"],
     "skills": [
-        "Python", "Playwright", "JavaScript", "TypeScript", "Appium", "Git",
-        "GitHub", "Jira", "Swagger", "SQL", "CI/CD", "Confluence",
-        "API Testing", "Manual Testing", "Regression Testing", "E2E Testing",
-        "AI-Assisted Testing", "Prompt Engineering"
+        "Playwright", "Page Object Model", "JavaScript", "TypeScript", "Python",
+        "Appium", "Android UiAutomator2", "iOS XCUITest", "WebDriverAgent", "Xcode",
+        "Real Device Testing", "REST API Validation", "Backend Workflow Validation",
+        "Data Mapping", "Data Integrity Validation", "Functional Testing",
+        "Regression Testing", "Integration Testing", "End-to-End Testing",
+        "UI Testing", "Smoke Testing", "Sanity Testing", "Cross-Browser Testing",
+        "Cross-Device Testing", "SQL", "MSSQL", "SQL Server", "Query Validation",
+        "Database Validation", "AI-Assisted Test Design", "AI-Assisted Debugging",
+        "Prompt Engineering", "Structured Prompting", "Context Engineering",
+        "Prompt Optimization", "Output Validation", "HTML", "CSS", "Flask",
+        "ASP.NET Web Forms", "C#", "GitHub", "Figma", "Render", "Power BI",
+        "Tableau", "Pandas", "Matplotlib"
     ],
+    "certifications": [
+        "Python Programming – Coursera",
+        "Introduction to SQL – Coursera",
+        "Data Analyst & Visualization – Anudip Foundation",
+        "ASP.NET Web Development – Vishwatech Education",
+        "Deloitte Australia Data Analytics Virtual Experience – Forage"
+    ],
+    "education": [
+        "MCA – Master of Computer Applications | University Institute of Technology, Bhopal | 2023–2025 | CGPA 8.32",
+        "B.Tech – Electrical & Electronics Engineering | Lakshmi Narain College of Technology | 2019–2023 | CGPA 8.77"
+    ],
+    "projects": [
+        "TesterWish – QA Testing Utility",
+        "Satyen78AI – AI / Web Application",
+        "Super15 – Python / Flask / Machine Learning",
+        "Power BI & Python Analysis Dashboards",
+        "ScholarUltimate Matrix – ASP.NET / SQL Server"
+    ]
 }
 
 ROLE_KEYWORDS = {
-    "QA Automation Engineer": ["qa automation", "automation qa", "automation engineer", "quality assurance automation"],
-    "Automation Tester": ["automation tester", "test automation", "qa automation"],
+    "QA Engineer": ["qa engineer", "quality assurance engineer", "quality engineer", "qa analyst", "quality analyst", "quality assurance"],
+    "QA Automation Engineer": ["qa automation", "automation qa", "automation engineer", "quality assurance automation", "qa automation engineer"],
+    "Automation Tester": ["automation tester", "test automation", "qa automation", "automation testing"],
     "SDET": ["sdet", "software development engineer in test"],
     "Software Tester": ["software tester", "qa tester", "test engineer", "qa analyst", "quality analyst"],
-    "Test Engineer": ["test engineer", "quality engineer"],
-    "AI Assisted QA": ["ai assisted qa", "ai qa", "ai testing", "ai-assisted testing"],
-    "AI Assisted Tester": ["ai tester", "ai-assisted tester"],
-    "Frontend Designer": ["frontend designer", "ui designer", "frontend"],
+    "Test Engineer": ["test engineer", "quality engineer", "software test engineer"],
+    "AI-Assisted QA": ["ai assisted qa", "ai-assisted qa", "ai qa", "ai testing", "ai-assisted testing"],
+    "AI-Assisted Tester": ["ai tester", "ai-assisted tester"],
+    "QA Analyst": ["qa analyst", "quality analyst"],
+    "Quality Analyst": ["quality analyst", "quality assurance analyst"],
     "AI-Assisted Developer": ["ai-assisted developer", "ai developer"],
-    "Vibe Coding": ["vibe coding", "ai coding"],
 }
 
 STOPWORDS = {
@@ -355,14 +387,18 @@ def job_fingerprint(job):
 def make_answers(job):
     title, company = job["title"], job["company"]
     return {
-        "why_interested": f"I’m interested in the {title} opportunity at {company} because it aligns with my hands-on experience in QA automation, Playwright, API validation, mobile testing and AI-assisted testing. In my current QA role, I work across functional, regression, integration and end-to-end testing and build reusable automation workflows.",
-        "why_hire": "I bring hands-on experience across manual and automation testing, with practical exposure to Playwright, JavaScript/TypeScript, Appium, API validation, SQL, CI/CD and real-device testing. I also use AI-assisted workflows for test design, automation development, debugging and edge-case analysis while validating the output against requirements.",
+        "why_interested": f"I’m interested in the {title} opportunity at {company} because it aligns with my hands-on QA experience across manual testing, Playwright automation, Appium mobile testing, REST API validation, SQL/database validation and AI-assisted QA.",
+        "why_hire": "I bring practical experience in functional, regression, integration and end-to-end testing, with Playwright and Page Object Model for web automation, Appium for Android/iOS real-device testing, REST API and database validation, and AI-assisted test design and debugging.",
         "expected_salary": "₹4–5 LPA, negotiable based on the role, responsibilities, overall compensation and growth opportunity.",
-        "relocation": "Yes. I am open to relocating for the right opportunity, particularly to Bengaluru or Pune.",
+        "relocation": "Yes. I am open to relocating for suitable opportunities, including Bengaluru and Pune.",
         "sponsorship": "No.",
         "join": "I currently have a 45-day notice period.",
-        "automation_experience": "Around 1 year of hands-on QA automation experience using Playwright with JavaScript/TypeScript and Page Object Model, plus Appium for Android and iOS mobile automation. I have also worked with API validation, SQL/database validation, cross-browser/device testing and end-to-end workflows.",
-        "playwright_experience": "Approximately 1 year of hands-on experience.",
+        "automation_experience": "Around 1 year of hands-on QA automation experience with Playwright, JavaScript/TypeScript and Page Object Model, plus Appium with Android UiAutomator2 and iOS XCUITest/WebDriverAgent on real devices.",
+        "playwright_experience": "Approximately 1 year of hands-on experience with Playwright, JavaScript/TypeScript and Page Object Model.",
+        "mobile_automation_experience": "Hands-on Appium experience across Android UiAutomator2 and iOS XCUITest/WebDriverAgent, including real-device testing.",
+        "api_testing_experience": "Hands-on REST API validation, backend workflow validation, data mapping and data integrity validation.",
+        "database_experience": "SQL, MSSQL and SQL Server with query and database validation.",
+        "ai_qa_experience": "AI-assisted test design, automation-script drafting, debugging, edge-case analysis, prompt optimization and output validation with human review.",
         "selenium_experience": "I do not currently list professional Selenium experience on my resume.",
         "authorized_india": "Yes.",
     }
