@@ -53,6 +53,11 @@
  <div class="config" id="config" style="margin-top:12px"></div>
 </section>
 
+<section class="panel platform-panel">
+ <div class="panel-head"><div><h2>Indian job platforms</h2><small>Open the official search on LinkedIn, Indeed, Naukri or Apna. ApplyBot never scrapes or bypasses their anti-bot controls.</small></div><button class="secondary" onclick="loadPlatformSearches()">Refresh searches</button></div>
+ <div id="platformSearches" class="platform-grid"><div class="empty">Loading platform searches…</div></div>
+</section>
+
 <section class="panel">
  <div class="panel-head"><div><h2>Matching results</h2><small>Only roles matching your configured profile are actionable.</small></div><button class="secondary" onclick="loadAll()">Refresh</button></div>
  <div id="jobs" class="results"><div class="empty">No search has been run yet.</div></div>
@@ -120,6 +125,13 @@ function jobCard(j){
   '<details><summary>Why this score?</summary><div class="reasons">'+reasons+'</div>'+(skills?'<div class="skills">'+skills+'</div>':'')+'</details>'+
   '</div><div class="job-actions">'+apply+'</div></article>';
 }
+async function loadPlatformSearches(){
+ try{
+  const q=new URLSearchParams({query:val('query')||'QA Automation Engineer',location:val('location')||'India',remote:String($('remote').checked)});
+  const x=await api('/api/search-links?'+q.toString());
+  $('platformSearches').innerHTML=(x.platforms||[]).map(p=>'<div class="platform-card"><div><b>'+esc(p.name)+'</b><div class="muted">'+esc(p.note||'Official platform search')+'</div></div><button onclick="openEmployer(\''+String(p.search_url).replace(/'/g,'')+'\')">Open search ↗</button></div>').join('');
+ }catch(e){$('platformSearches').innerHTML='<div class="empty">Platform search links unavailable.</div>'}
+}
 async function loadJobs(){
  const jobs=await api('/api/jobs');
  $('kFound').textContent=jobs.length;
@@ -132,7 +144,7 @@ async function loadHistory(){
  $('kAction').textContent=apps.filter(a=>['requires_user_action','requires_configuration','failed','unsupported'].includes(a.status)).length;
  $('history').innerHTML=apps.length?apps.map(a=>{const action=a.status==='requires_user_action'&&a.application_url?'<div class="actions" style="margin:0"><button class="secondary" onclick="openVerification('+a.job_id+',\''+String(a.application_url).replace(/'/g,'')+'\')">Open verification</button><button onclick="continueVerification('+a.job_id+')">Continue after verification</button></div>':'';return '<div class="history-row"><div><b>'+esc(a.title)+'</b><br>'+esc(a.company)+'</div><div>'+esc(a.status)+'</div><div>'+esc(a.adapter||'—')+'</div><div>'+esc(a.submission_message||'—')+' '+action+'</div></div>';}).join(''):'<div class="empty">No applications yet.</div>';
 }
-async function loadAll(){await Promise.all([loadConfig(),loadJobs(),loadHistory()])}
+async function loadAll(){await Promise.all([loadConfig(),loadJobs(),loadHistory(),loadPlatformSearches()])}
 async function discover(auto){
  const rawExp=val('maxExp'); const payload={query:val('query')||'QA Automation Engineer',location:val('location')||'India',remote:$('remote').checked,threshold:Number(val('threshold')||65),max_experience:rawExp===''?0:Number(rawExp),min_salary:Number(val('minSalary')||3)};
  $('searchBtn').disabled=true;$('autoBtn').disabled=true;
