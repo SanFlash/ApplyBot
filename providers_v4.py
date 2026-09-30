@@ -184,14 +184,289 @@ def _dedupe(jobs):
     return out
 
 
+def _live_job_matches(job, query):
+    """Match a live listing against the requested role without requiring an exact title."""
+    q = (query or "").strip().lower()
+    if not q:
+        return True
+    title = str(job.get("title") or "").lower()
+    description = str(job.get("description") or "").lower()
+    text = title + " " + description
+    qt = _tokens(q)
+    if not qt:
+        return True
+
+    # Strong role-family matching for common QA/search terms.
+    families = [
+        ("qa", ("qa", "quality assurance", "qa engineer", "quality engineer")),
+        ("automation", ("automation", "test automation", "automation tester", "automation engineer")),
+        ("sdet", ("sdet", "software development engineer in test")),
+        ("tester", ("tester", "software tester", "test engineer", "qa tester", "testing")),
+    ]
+    requested_families = []
+    for key, phrases in families:
+        if any(p in q for p in phrases):
+            requested_families.append(key)
+
+    if requested_families:
+        for key, phrases in families:
+            if key in requested_families and any(p in title for p in phrases):
+                return True
+
+    title_hits = len(qt & _tokens(title))
+    text_hits = sum(1 for token in qt if token in text)
+    if len(qt) == 1:
+        return next(iter(qt)) in text
+    return title_hits >= max(1, (len(qt) + 1) // 2) or text_hits >= max(2, min(3, len(qt)))
+
+
+def _live_location_matches(job, location, remote=False):
+    """Match requested city/state/country using published location/work-mode text."""
+    wanted = (location or "").strip().lower()
+    loc = str(job.get("location") or "").lower()
+    desc = str(job.get("description") or "").lower()
+    mode = str(job.get("work_mode") or "").lower()
+    text = " ".join((loc, desc, mode))
+
+    if remote:
+        return "remote" in text or bool(job.get("is_remote"))
+
+    if not wanted:
+        return True
+
+    if wanted in {"remote", "anywhere", "worldwide", "global"}:
+        return "remote" in text or bool(job.get("is_remote"))
+
+    aliases = {
+        "india": ("india", "indian", "bengaluru", "bangalore", "pune", "hyderabad", "mumbai",
+                  "delhi", "new delhi", "noida", "gurugram", "gurgaon", "chennai", "kolkata",
+                  "indore", "bhopal", "jaipur", "ahmedabad", "kochi"),
+        "bengaluru": ("bengaluru", "bangalore"),
+        "bangalore": ("bengaluru", "bangalore"),
+        "mumbai": ("mumbai",),
+        "delhi": ("delhi", "new delhi"),
+        "gurugram": ("gurugram", "gurgaon"),
+        "gurgaon": ("gurugram", "gurgaon"),
+        "noida": ("noida",),
+        "hyderabad": ("hyderabad",),
+        "pune": ("pune",),
+        "chennai": ("chennai",),
+        "kolkata": ("kolkata",),
+        "indore": ("indore",),
+        "bhopal": ("bhopal",),
+        "jaipur": ("jaipur",),
+        "ahmedabad": ("ahmedabad",),
+        "kochi": ("kochi", "cochin"),
+    }
+    needles = aliases.get(wanted, (wanted,))
+    if any(n in loc for n in needles):
+        return True
+
+    # Country-wide searches can accept clearly country-wide/remote postings.
+    if wanted in {"india", "ind"} and any(x in text for x in ("apac", "asia", "south asia", "remote")):
+        return True
+
+    return False
+
+
+def _normalize_arbeitnow(raw):
+    if not isinstance(raw, dict):
+        return None
+    title = str(raw.get("title") or "").strip()
+    company = str(raw.get("company_name") or raw.get("company") or "Unknown").strip()
+    location = str(raw.get("location") or "").strip()
+    url = str(raw.get("url") or "").strip()
+    if not title or not url:
+        return None
+    description = re.sub(r"<[^>]+>", " ", str(raw.get("description") or "")).strip()
+    remote = bool(raw.get("remote")) or "remote" in (location + " " + description).lower()
+    return {
+        "external_id": "arbeitnow:" + str(raw.get("slug") or raw.get("id") or url),
+        "source": "Arbeitnow Live",
+        "source_url": url,
+        "title": title,
+        "company": company,
+        "location": location or ("Remote" if remote else "Unspecified"),
+        "work_mode": "Remote" if remote else "",
+        "salary_min": None,
+        "salary_max": None,
+        "experience_min": None,
+        "url": url,
+        "description": description or title,
+        "employment_type": str(raw.get("job_types") or raw.get("job_type") or ""),
+        "posted_at": str(raw.get("created_at") or raw.get("date") or ""),
+        "is_remote": remote,
+    }
+
+
+def _fetch_live_arbeitnow(query, location, remote):
+    results, errors = [], []
+    # Arbeitnow exposes a public job-board API. We inspect several fresh pages
+    # because a single page can easily miss a requested city.
+    for page in range(1, 6):
+        try:
+            url = "https://www.arbeitnow.com/api/job-board-api?page=" + str(page)
+            req = urllib.request.Request(
+                url,
+                headers={
+                    "User-Agent": "ApplyBot/6.0 (+live job discovery)",
+                    "Accept": "application/json",
+                    "Cache-Control": "no-cache",
+                },
+            )
+            with urllib.request.urlopen(req, timeout=15) as response:
+                payload = json.loads(response.read().decode("utf-8"))
+            rows = payload.get("data", []) if isinstance(payload, dict) else []
+            if not rows:
+                break
+            for raw in rows:
+                job = _normalize_arbeitnow(raw)
+                if job and _live_job_matches(job, query) and _live_location_matches(job, location, remote):
+                    job["_query"] = query
+                    results.append(job)
+            meta = payload.get("meta") if isinstance(payload, dict) else {}
+            if not isinstance(meta, dict) or not meta.get("has_more_pages"):
+                break
+        except Exception as exc:
+            errors.append("page %d: %s" % (page, str(exc)[:500]))
+            break
+    return _dedupe(results), errors
+
+
+def _normalize_remotive_live(raw):
+    if not isinstance(raw, dict):
+        return None
+    title = str(raw.get("title") or "").strip()
+    company = str(raw.get("company_name") or "Unknown").strip()
+    url = str(raw.get("url") or "").strip()
+    if not title or not url:
+        return None
+    description = re.sub(r"<[^>]+>", " ", str(raw.get("description") or "")).strip()
+    location = str(raw.get("candidate_required_location") or "Remote").strip()
+    return {
+        "external_id": "remotive:" + str(raw.get("id") or url),
+        "source": "Remotive Live",
+        "source_url": url,
+        "title": title,
+        "company": company,
+        "location": location,
+        "work_mode": "Remote",
+        "salary_min": None,
+        "salary_max": None,
+        "experience_min": None,
+        "url": url,
+        "description": description or title,
+        "employment_type": str(raw.get("job_type") or ""),
+        "posted_at": str(raw.get("publication_date") or ""),
+        "is_remote": True,
+    }
+
+
+def _fetch_live_remote(query):
+    results, errors = [], []
+    endpoints = [
+        "https://remotive.com/api/remote-jobs?search=" + urllib.parse.quote(query),
+        "https://remoteok.com/api",
+    ]
+    for endpoint in endpoints:
+        try:
+            req = urllib.request.Request(
+                endpoint,
+                headers={"User-Agent": "ApplyBot/6.0 (+live remote job discovery)", "Accept": "application/json"},
+            )
+            with urllib.request.urlopen(req, timeout=15) as response:
+                payload = json.loads(response.read().decode("utf-8"))
+            if "remotive.com" in endpoint:
+                rows = payload.get("jobs", []) if isinstance(payload, dict) else []
+                for raw in rows:
+                    job = _normalize_remotive_live(raw)
+                    if job and _live_job_matches(job, query):
+                        job["_query"] = query
+                        results.append(job)
+            else:
+                rows = payload if isinstance(payload, list) else []
+                for raw in rows:
+                    title = str(raw.get("position") or "").strip() if isinstance(raw, dict) else ""
+                    url = str(raw.get("url") or "").strip() if isinstance(raw, dict) else ""
+                    if not title or not url:
+                        continue
+                    description = re.sub(r"<[^>]+>", " ", str(raw.get("description") or "")).strip()
+                    job = {
+                        "external_id": "remoteok:" + str(raw.get("id") or url),
+                        "source": "RemoteOK Live",
+                        "source_url": url,
+                        "title": title,
+                        "company": str(raw.get("company") or "Unknown").strip(),
+                        "location": str(raw.get("location") or "Worldwide").strip(),
+                        "work_mode": "Remote",
+                        "salary_min": None,
+                        "salary_max": None,
+                        "experience_min": None,
+                        "url": url,
+                        "description": description or title,
+                        "is_remote": True,
+                    }
+                    if _live_job_matches(job, query):
+                        job["_query"] = query
+                        results.append(job)
+        except Exception as exc:
+            errors.append(endpoint.split("/")[2] + ": " + str(exc)[:500])
+    return _dedupe(results), errors
+
+
+def _dataset_status(selected, raw_count):
+    return {
+        "source": "Free ATS Dataset",
+        "found": len(selected),
+        "raw_found": raw_count,
+        "configured": True,
+        "provider": "Public daily-updated dataset from Greenhouse, Lever, Ashby, Workday, SmartRecruiters, Workable, Recruitee, Personio and BambooHR",
+    }
+
+
 def search_public_sources(query, location="", remote=False):
+    """Search fresh public feeds first, then use the daily ATS dataset as recall fallback.
+
+    The previous implementation returned only the daily GitHub snapshot. This
+    version combines live location-aware listings with that snapshot, dedupes
+    them, and never claims the snapshot is the complete market.
+    """
     query = (query or "").strip() or "QA Automation Engineer"
     location = (location or "").strip() or "India"
     results, errors, status = [], [], []
 
+    # 1) Live location-aware public feed.
+    live, live_errors = _fetch_live_arbeitnow(query, location, remote)
+    results.extend(live)
+    errors.extend({"source": "Arbeitnow", "error": e} for e in live_errors)
+    status.append({
+        "source": "Arbeitnow Live",
+        "found": len(live),
+        "raw_found": len(live),
+        "configured": True,
+        "provider": "Public live job-board API",
+        "location_search": location,
+        "fresh": True,
+    })
+
+    # 2) Remote-only live feeds when the user asks for remote.
+    if remote or location.lower() in {"remote", "anywhere", "worldwide", "global"}:
+        remote_jobs, remote_errors = _fetch_live_remote(query)
+        results.extend(remote_jobs)
+        errors.extend({"source": "Remote feeds", "error": e} for e in remote_errors)
+        status.append({
+            "source": "Remote Live",
+            "found": len(remote_jobs),
+            "raw_found": len(remote_jobs),
+            "configured": True,
+            "provider": "Remotive + RemoteOK public APIs",
+            "fresh": True,
+        })
+
+    # 3) Daily normalized ATS dataset remains the free fallback for recall.
     if FREE_DATASET_ENABLED:
         try:
-            raw, _ = _fetch_dataset()
+            raw, stale_note = _fetch_dataset()
             selected = [
                 j for j in raw
                 if _relevant(j, query) and _location_ok(j, location, remote)
@@ -199,40 +474,12 @@ def search_public_sources(query, location="", remote=False):
             for j in selected:
                 j["_query"] = query
             results.extend(selected[:500])
-            status.append({
-                "source": "Free ATS Dataset",
-                "found": len(selected),
-                "raw_found": len(raw),
-                "configured": True,
-                "provider": "Public daily-updated dataset from Greenhouse, Lever, Ashby, Workday, SmartRecruiters, Workable, Recruitee, Personio and BambooHR",
-            })
+            status.append(_dataset_status(selected, len(raw)))
+            if stale_note:
+                status[-1]["note"] = stale_note
         except Exception as exc:
             errors.append({"source": "Free ATS Dataset", "error": str(exc)[:800]})
-            status.append({
-                "source": "Free ATS Dataset",
-                "found": 0,
-                "raw_found": 0,
-                "configured": True,
-                "provider": "Public GitHub JSON dataset",
-            })
-    else:
-        status.append({
-            "source": "Free ATS Dataset",
-            "found": 0,
-            "raw_found": 0,
-            "configured": False,
-            "provider": "Disabled",
-        })
+            status.append(_dataset_status([], 0))
 
-    # v4 is intentionally self-contained. Do not import providers_v3 here:
-    # legacy providers can have optional dependencies, slow network calls, or
-    # stale APIs and must never be able to break the free discovery path.
-    status.append({
-        "source": "Legacy Providers",
-        "found": 0,
-        "raw_found": 0,
-        "configured": False,
-        "provider": "Disabled in free-first discovery path",
-    })
-
-    return _dedupe(results)[:500], errors, status
+    final = _dedupe(results)
+    return final[:800], errors, status
