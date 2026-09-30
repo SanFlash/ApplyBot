@@ -1775,10 +1775,22 @@ def submit_with_browser(job, answers):
         return {"status": "unsupported_source_policy", "adapter": adapter,
                 "message": "Remotive public API terms do not permit submitting its listings to third-party sites. This listing can be reviewed, but ApplyBot will not auto-submit it."}
     if adapter == "unsupported":
-        message = "No supported employer application URL was found."
-        if resolution_message:
-            message += " " + resolution_message + "."
-        return {"status": "unsupported", "adapter": adapter, "message": message}
+        # A listing may have a perfectly valid employer/application page without
+        # being one of the ATS adapters that ApplyBot can safely automate.
+        # Do not fail the user with "No supported employer application URL".
+        # Hand the exact listing/application URL back to the user instead.
+        return {
+            "status": "requires_user_action",
+            "adapter": "human_handoff",
+            "application_url": application_url or job.get("url"),
+            "message": (
+                "This job does not use a supported employer ATS adapter. "
+                "ApplyBot found the job/application page, but will not guess "
+                "or automate an unsupported form. Open the application page "
+                "and complete the application there."
+                + ((" " + resolution_message + ".") if resolution_message else "")
+            ),
+        }
     if not CANDIDATE_EMAIL or not CANDIDATE_PHONE:
         return {"status": "requires_configuration", "adapter": adapter,
                 "message": "Configure CANDIDATE_EMAIL, CANDIDATE_PHONE and RESUME_PATH."}
