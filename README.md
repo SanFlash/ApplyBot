@@ -22,6 +22,43 @@ Supported browser application flow
 Application history + evidence
 ```
 
+
+
+## Resume-aligned candidate profile
+
+The default matching profile is aligned to the uploaded resume:
+
+- **Target roles:** QA Engineer, QA Automation Engineer, Automation Tester, SDET, Software Tester, Test Engineer, Quality Assurance Engineer and AI-assisted QA/testing.
+- **Automation:** Playwright, JavaScript/TypeScript, Page Object Model, Appium, Android UiAutomator2, iOS XCUITest/WebDriverAgent, Xcode and real-device testing.
+- **QA:** Functional, regression, integration, E2E, UI, smoke, sanity, cross-browser and cross-device testing.
+- **API/backend:** REST API validation, backend workflow validation, data mapping and data integrity validation.
+- **Database:** SQL, MSSQL and SQL Server.
+- **AI QA:** prompt engineering, structured prompting, context engineering, prompt optimization, AI-assisted test design/debugging and output validation.
+- **Development/data:** Python, Flask, ASP.NET Web Forms, C#, HTML/CSS, Pandas, Matplotlib, Power BI and Tableau.
+- **Education:** MCA (8.32 CGPA) and B.Tech Electrical & Electronics Engineering (8.77 CGPA).
+- **Target compensation:** ₹4–5 LPA; minimum qualification threshold configured at ₹3 LPA.
+- **Notice period:** 45 days.
+- **Locations:** India, Bhopal, Indore, Bengaluru, Pune and remote-compatible roles.
+
+The private PDF resume is **not committed to this public repository**. Upload it through the ApplyBot dashboard or provide it through private deployment storage. Candidate email/phone are read from environment variables.
+
+## Application capability
+
+Every result now has an explicit application capability:
+
+- **ATS automation available:** Greenhouse, Lever, Ashby, Workable or SmartRecruiters application URL.
+- **Human application:** LinkedIn, Indeed, Naukri, Apna or an unsupported employer form.
+- **CAPTCHA/human verification:** the automation pauses and hands the employer page back to the user.
+- **Unsupported form:** the job is not discarded merely because ApplyBot cannot safely automate its form; the discovered application URL is returned for manual completion.
+
+This prevents a real job from being incorrectly reported as “No supported employer application URL”.
+
+## Free-first platform model
+
+LinkedIn, Indeed, Naukri and Apna are provided as official search handoffs. ApplyBot does not collect their passwords/cookies or implement unauthorized scraping/login automation. The employer ATS adapters remain the automatic application path.
+
+For Apna, the official jobs UI supports job search and filters including salary, work mode and work type. citeturn0search1turn0search0
+
 ## Discovery: free by default
 
 The active discovery engine uses the public, daily-refreshed Open Jobs Data dataset from ConorsCode. It aggregates public job-board feeds from ATS platforms including Greenhouse, Lever, Ashby, Workday, SmartRecruiters, Workable, Recruitee, Personio and BambooHR. The dataset exposes a normalized `applyUrl`, location, remote flag, employment type and posting timestamp.
