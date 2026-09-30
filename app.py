@@ -160,6 +160,7 @@ def ensure_schema_columns(c):
             "submission_id": "TEXT",
             "submission_message": "TEXT",
             "submitted_at": "TEXT",
+            "application_url": "TEXT",
         },
         "jobs": {
             "match_reasons": "TEXT",
@@ -1862,8 +1863,8 @@ def auto_apply_job(job_id, threshold=70, max_experience=2, min_salary=3):
     if score < float(threshold):
         return {"status": "below_threshold", "submitted": False, "message": f"Match score {score:.0f}% is below the {float(threshold):.0f}% threshold."}
     exp = job.get("experience_min")
-    if exp is not None and float(exp) > float(max_experience):
-        return {"status": "experience_exceeds_limit", "submitted": False, "message": f"Required experience {float(exp):g}+ years exceeds the configured limit."}
+    if not experience_matches_filter(exp, max_experience):
+        return {"status": "experience_exceeds_limit", "submitted": False, "message": "Published experience requirement exceeds the selected fresher/maximum-years filter."}
     salary = job.get("salary_max")
     if salary is not None and float(salary) < float(min_salary):
         return {"status": "salary_below_minimum", "submitted": False, "message": "Published salary is below the configured minimum."}
