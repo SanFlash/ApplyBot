@@ -1359,12 +1359,32 @@ def search_links():
     return jsonify(build_search_links(query, location, remote))
 
 
+def experience_matches_filter(experience_min, max_experience):
+    """Apply the UI experience filter fairly, including true fresher mode.
+
+    max_experience == 0 means entry-level/fresher: accept explicit 0-year,
+    fresher/intern-style roles and roles where the source did not publish an
+    experience requirement. For positive values, enforce the requested upper
+    bound while keeping undisclosed experience neutral.
+    """
+    if experience_min is None:
+        return True
+    try:
+        exp = float(experience_min)
+        limit = float(max_experience)
+    except (TypeError, ValueError):
+        return True
+    if limit <= 0:
+        return exp <= 0.0
+    return exp <= limit
+
+
 def run_discovery(body):
     query = str(body.get("query") or "QA Automation Engineer").strip()
     location = str(body.get("location") or "India").strip()
     remote = bool(body.get("remote", False))
     threshold = float(body.get("threshold", 70))
-    max_experience = float(body.get("max_experience", 2))
+    max_experience = max(0.0, float(body.get("max_experience", 2)))
     min_salary = max(float(body.get("min_salary", 3)), CANDIDATE["minimum_ctc_lpa"])
 
     items, errors, source_status = search_public_sources(query, location, remote)
@@ -1384,14 +1404,14 @@ def run_discovery(body):
     for r in results:
         exp_value = r.get("experience_min")
         salary_value = r.get("salary_max")
-        exp_ok = exp_value is None or float(exp_value) <= max_experience
+        exp_ok = experience_matches_filter(exp_value, max_experience)
         salary_ok = salary_value is None or float(salary_value) >= min_salary
         threshold_ok = float(r.get("score") or 0) >= threshold
         r["qualified"] = bool(threshold_ok and exp_ok and salary_ok)
         r["qualification_reason"] = (
             "Qualified" if r["qualified"] else
             ("Below match threshold" if not threshold_ok else
-             ("Experience exceeds limit" if not exp_ok else "Published salary is below minimum"))
+             ("Experience exceeds the selected fresher/maximum-years filter" if not exp_ok else "Published salary is below minimum"))
         )
         if r["qualified"]:
             qualified.append(r)
@@ -1763,8 +1783,12 @@ def submit_with_browser(job, answers):
                 r"\b(captcha|verify you are human|cloudflare challenge)\b", body_text, re.I
             ):
                 browser.close()
-                return {"status": "requires_user_action", "adapter": adapter,
-                        "message": "CAPTCHA/human verification detected; submission stopped without bypassing it."}
+                return {
+                    "status": "requires_user_action",
+                    "adapter": adapter,
+                    "application_url": page.url or job["url"],
+                    "message": "Human verification/CAPTCHA detected. The employer page is ready for you to complete verification; ApplyBot will not bypass it. After verification, return to ApplyBot and choose Continue after verification.",
+                }
 
             first, last = CANDIDATE["name"].split(" ", 1)[0], CANDIDATE["name"].split(" ")[-1]
             _fill_first(page, ['input[name*="first" i]', 'input[id*="first" i]'], first)
@@ -1862,7 +1886,24 @@ def auto_apply_job(job_id, threshold=70, max_experience=2, min_salary=3):
     app_row = c.execute("SELECT id FROM applications WHERE job_id=? ORDER BY id DESC LIMIT 1", (job_id,)).fetchone()
     c.close()
     return {"status": "applied" if status == "submitted" else status, "submitted": status == "submitted",
-            "application_id": app_row["id"] if app_row else None, "adapter": result.get("adapter"), "message": result.get("message")}
+            "application_id": app_row["id"] if app_row else None, "adapter": result.get("adapter"),
+            "application_url": result.get("application_url") or job.get("url"),
+            "message": result.get("message")}
+
+
+@app.post("/api/jobs/<int:job_id>/continue-after-verification")
+def continue_after_verification(job_id):
+    """Retry the controlled application flow after the user handles a challenge."""
+    body = request.get_json(silent=True) or {}
+    try:
+        threshold = float(body.get("threshold", 70))
+        max_experience = max(0.0, float(body.get("max_experience", 2)))
+        min_salary = max(float(body.get("min_salary", 3)), CANDIDATE["minimum_ctc_lpa"])
+    except (TypeError, ValueError):
+        return jsonify({"error": "Invalid threshold, experience or salary value."}), 400
+    result = auto_apply_job(job_id, threshold, max_experience, min_salary)
+    result["continued_after_verification"] = True
+    return jsonify(result)
 
 
 @app.post("/api/jobs/<int:job_id>/prepare")
