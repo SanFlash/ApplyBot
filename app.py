@@ -297,16 +297,12 @@ def score_job(j):
     else:
         return 0, ["Role does not match the configured QA/automation targets"], []
 
-    compatible_locations = (
-        "india", "bengaluru", "bangalore", "pune", "hyderabad", "delhi",
-        "gurugram", "gurgaon", "noida", "mumbai", "indore", "chennai",
-        "kolkata", "remote", "anywhere", "worldwide", "global", "apac", "asia"
-    )
-    if any(term in location for term in compatible_locations) or not location:
+    # Location is already filtered by the discovery provider. Do not use a
+    # hard-coded city allow-list here: that silently discarded valid results
+    # for cities such as Bhopal, Jaipur, Kochi, Chandigarh, etc.
+    if location:
         score += 18
-        reasons.append("Location is compatible with the selected search")
-    else:
-        return 0, ["Location is outside the selected preferences"], []
+        reasons.append("Location matches the requested search")
 
     if "remote" in mode or "remote" in location:
         score += 5
