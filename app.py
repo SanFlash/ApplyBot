@@ -369,14 +369,56 @@ def make_answers(job):
 
 
 def build_search_links(query, location="", remote=False):
-    # Kept only for backwards-compatible API consumers. Discovery itself is now
-    # performed server-side by authorized job APIs and configured feeds.
+    """Build official platform search handoffs without scraping or account automation.
+
+    LinkedIn and Apna explicitly prohibit unauthorized scraping/bots, and Indeed
+    limits API use to approved integrations. These links therefore open each
+    platform's own search UI; ApplyBot can continue automation only on employer
+    ATS flows that it supports. This keeps the multi-platform workflow useful
+    without pretending that a public search URL is an authorized API.
+    """
+    from urllib.parse import quote_plus
+    q = (query or "QA Automation Engineer").strip()
+    loc = (location or "India").strip()
+    qx, lx = quote_plus(q), quote_plus(loc)
+    slug = lambda value: re.sub(r"[^a-z0-9]+", "-", value.lower()).strip("-")
+    entry = max(0, 0)  # fresher/entry-level hint; platform UIs remain source of truth
     return {
-        "mode": "in_app",
-        "query": query.strip() or "QA Automation Engineer",
-        "location": location.strip() or "India",
+        "mode": "official_platform_handoff",
+        "query": q,
+        "location": loc,
         "remote": bool(remote),
-        "note": "ApplyBot performs discovery inside the application using authorized APIs and configured feeds."
+        "platforms": [
+            {
+                "id": "linkedin",
+                "name": "LinkedIn",
+                "search_url": f"https://www.linkedin.com/jobs/search/?keywords={qx}&location={lx}",
+                "apply_mode": "human_handoff",
+                "note": "Use LinkedIn's own search and application UI. No scraping or bot login."
+            },
+            {
+                "id": "indeed",
+                "name": "Indeed",
+                "search_url": f"https://www.indeed.com/jobs?q={qx}&l={lx}",
+                "apply_mode": "human_handoff",
+                "note": "Official search handoff; API automation requires an approved Indeed integration."
+            },
+            {
+                "id": "naukri",
+                "name": "Naukri",
+                "search_url": f"https://www.naukri.com/{slug(q)}-jobs-in-{slug(loc)}",
+                "apply_mode": "human_handoff",
+                "note": "Official Naukri search handoff; no scraping/login bot."
+            },
+            {
+                "id": "apna",
+                "name": "Apna",
+                "search_url": f"https://apna.co/jobs?search={qx}&location={lx}",
+                "apply_mode": "human_handoff",
+                "note": "Official Apna search handoff; application remains in Apna's UI."
+            }
+        ],
+        "note": "ApplyBot combines permitted live feeds with official platform handoffs. It does not bypass platform anti-bot controls."
     }
 
 
