@@ -57,7 +57,7 @@ This prevents a real job from being incorrectly reported as “No supported empl
 
 LinkedIn, Indeed, Naukri and Apna are provided as official search handoffs. ApplyBot does not collect their passwords/cookies or implement unauthorized scraping/login automation. The employer ATS adapters remain the automatic application path.
 
-For Apna, the official jobs UI supports job search and filters including salary, work mode and work type. citeturn0search1turn0search0
+For Apna, the official jobs UI supports job search and filters including salary, work mode and work type.
 
 ## Discovery: free by default
 
