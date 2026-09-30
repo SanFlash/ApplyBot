@@ -5,83 +5,8 @@
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>ApplyBot — Job Search Workspace</title>
 <style>
-:root{
-  --bg:#07111f;--panel:#0d1a2b;--panel2:#102139;--line:#1d3552;--text:#f4f8ff;
-  --muted:#8fa5bf;--accent:#71a7ff;--good:#43d99a;--warn:#ffd166;--bad:#ff7183;
-}
-*{box-sizing:border-box}
-body{margin:0;background:linear-gradient(135deg,#06101c 0%,#0a1728 52%,#08111e 100%);color:var(--text);font:14px Inter,system-ui,-apple-system,Segoe UI,sans-serif}
-button,input,select{font:inherit}
-button{border:0;border-radius:11px;padding:11px 15px;background:var(--accent);color:#06101c;font-weight:800;cursor:pointer}
-button.secondary{background:#182b45;color:#e7f0ff;border:1px solid #284463}
-button:disabled{opacity:.5;cursor:not-allowed}
-a{color:#9fc4ff}
-header{position:sticky;top:0;z-index:20;background:#07111fee;backdrop-filter:blur(18px);border-bottom:1px solid var(--line)}
-.nav{max-width:1320px;margin:auto;padding:15px 24px;display:flex;align-items:center;justify-content:space-between;gap:18px}
-.logo{font-size:22px;font-weight:950;letter-spacing:-.5px}.logo span{color:var(--accent)}
-.navnote{color:var(--muted);font-size:12px}
-.wrap{max-width:1320px;margin:auto;padding:34px 24px 70px}
-.hero{display:grid;grid-template-columns:1.45fr .8fr;gap:18px;align-items:stretch}
-.hero-main,.hero-side,.panel{background:linear-gradient(180deg,#102039,#0b1727);border:1px solid var(--line);border-radius:20px}
-.hero-main{padding:34px}
-.eyebrow{color:#9fc4ff;font-size:11px;font-weight:900;text-transform:uppercase;letter-spacing:1.5px}
-h1{font-size:clamp(32px,5vw,58px);line-height:1.02;margin:12px 0 14px;letter-spacing:-2px}
-.hero p{max-width:720px;color:var(--muted);font-size:16px;line-height:1.65;margin:0}
-.pipeline{display:flex;gap:8px;flex-wrap:wrap;margin-top:22px}
-.step{padding:7px 10px;border:1px solid #294766;border-radius:99px;color:#cfe0f7;background:#0a1728;font-size:11px}
-.hero-side{padding:24px;display:flex;flex-direction:column;justify-content:space-between}
-.health{padding:13px;border-radius:13px;background:#091625;border:1px solid var(--line)}
-.dot{display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--good);margin-right:7px}
-.dot.bad{background:var(--bad)}
-.muted{color:var(--muted)}
-.metrics{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-top:18px}
-.metric{padding:18px;background:#0d1a2b;border:1px solid var(--line);border-radius:16px}
-.metric b{display:block;font-size:29px;margin-top:4px}
-.panel{padding:22px;margin-top:18px}
-.panel-head{display:flex;align-items:center;justify-content:space-between;gap:15px;margin-bottom:18px}
-.panel h2{margin:0;font-size:18px}
-.search{display:grid;grid-template-columns:2fr 1fr 110px 110px;gap:10px}
-.field label{display:block;color:var(--muted);font-size:11px;margin:0 0 6px}
-input,select{width:100%;padding:12px;border-radius:11px;border:1px solid #294563;background:#081423;color:var(--text);outline:none}
-.actions{display:flex;gap:9px;flex-wrap:wrap;margin-top:12px}
-.search-actions{align-items:end}
-.options{display:grid;grid-template-columns:120px 120px 1fr;gap:10px;margin-top:10px}
-.toggle{display:flex;align-items:center;gap:8px;color:var(--muted);font-size:12px;padding-top:23px}
-.toggle input{width:auto}
-.status{margin-top:14px;padding:12px 14px;border:1px solid var(--line);border-radius:12px;background:#091625;color:#c9d8ea;line-height:1.5}
-.status.good{border-color:#245d49}.status.bad{border-color:#65313c;color:#ffb4bf}
-.results{display:grid;gap:12px}
-.job{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:18px;padding:20px;border:1px solid var(--line);border-radius:16px;background:#0a1727}
-.job-top{display:flex;justify-content:space-between;gap:12px}
-.job-title{font-size:17px;font-weight:900}.company{margin-top:4px;color:#b7c9df}
-.meta{display:flex;flex-wrap:wrap;gap:7px;margin-top:10px}
-.tag{font-size:11px;padding:6px 8px;border-radius:8px;background:#11233a;border:1px solid #25415f;color:#c9dcf5}
-.score{min-width:78px;text-align:center;padding:10px 8px;border-radius:12px;background:#0b2b25;color:var(--good);font-weight:950;font-size:20px}
-.job-actions{display:flex;align-items:center;justify-content:flex-end;gap:8px;flex-wrap:wrap;margin-top:14px}
-.job-links{margin-top:10px;font-size:12px}
-details{margin-top:12px;border-top:1px solid #1b304a;padding-top:10px}
-summary{cursor:pointer;color:#a8c9f8;font-size:12px}
-.reasons{color:var(--muted);line-height:1.65;margin-top:8px}
-.skills{display:flex;gap:5px;flex-wrap:wrap;margin-top:8px}
-.skill{font-size:10px;padding:5px 7px;border-radius:99px;border:1px solid #2a4867;color:#b9d5f5}
-.history{display:grid;gap:8px}
-.history-row{display:grid;grid-template-columns:1.4fr .8fr .8fr 2fr;gap:10px;padding:12px;border:1px solid var(--line);border-radius:12px;background:#091625;font-size:12px}
-.empty{text-align:center;padding:48px 20px;color:var(--muted);border:1px dashed #29415e;border-radius:14px}
-.config{display:flex;gap:8px;flex-wrap:wrap}
-.config-tag{font-size:11px;padding:7px 9px;border:1px solid #294563;border-radius:99px;color:#bcd0e8;background:#0a1727}
-.resume{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-top:12px;padding:13px;border:1px dashed #294563;border-radius:13px}
-small{color:var(--muted)}
-@media(max-width:900px){
- .hero{grid-template-columns:1fr}.metrics{grid-template-columns:repeat(2,1fr)}
- .search{grid-template-columns:1fr 1fr}.options{grid-template-columns:1fr 1fr}
-}
-@media(max-width:600px){
- .nav{padding:13px 16px}.navnote{display:none}.wrap{padding:20px 14px 50px}.hero-main{padding:24px}
- h1{letter-spacing:-1px}.metrics{grid-template-columns:1fr 1fr}.search{grid-template-columns:1fr}.options{grid-template-columns:1fr}
- .toggle{padding-top:5px}.job{grid-template-columns:1fr}.job-top{align-items:flex-start}.score{min-width:68px}
- .job-actions button{width:100%}.history-row{grid-template-columns:1fr}.resume{align-items:flex-start;flex-direction:column}
-}
-</style>
+:root{--bg:#f4f7f2;--surface:#fff;--line:#d7e2da;--text:#17231d;--muted:#64736a;--ink:#163b32;--accent:#e56b4f;--accent2:#2f8f83;--good:#277a61;--shadow:0 18px 45px rgba(27,58,48,.10)}
+*{box-sizing:border-box}html{scroll-behavior:smooth}body{margin:0;background:radial-gradient(circle at 10% 0%,#e7f3ec 0,#f7f8f4 34%,#edf2ed 100%);color:var(--text);font:14px Inter,ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif}button,input,select{font:inherit}button{border:0;border-radius:12px;padding:12px 16px;background:var(--ink);color:#fff;font-weight:850;cursor:pointer;transition:.18s}button:hover{transform:translateY(-1px);box-shadow:0 8px 20px rgba(22,59,50,.16)}button.secondary{background:#fff;color:var(--ink);border:1px solid var(--line)}button:disabled{opacity:.5;cursor:not-allowed;transform:none;box-shadow:none}a{color:#16776c;text-decoration:none}a:hover{text-decoration:underline}header{position:sticky;top:0;z-index:20;background:rgba(247,250,246,.9);backdrop-filter:blur(18px);border-bottom:1px solid var(--line)}.nav{max-width:1320px;margin:auto;padding:15px 24px;display:flex;align-items:center;justify-content:space-between;gap:18px}.logo{font-size:23px;font-weight:950;letter-spacing:-.7px;color:var(--ink)}.logo span{color:var(--accent)}.navnote{color:var(--muted);font-size:12px}.wrap{max-width:1320px;margin:auto;padding:30px 24px 70px}.hero{display:grid;grid-template-columns:1.6fr .8fr;gap:16px}.hero-main,.hero-side,.panel{background:rgba(255,255,255,.86);border:1px solid var(--line);border-radius:24px;box-shadow:var(--shadow)}.hero-main{padding:38px;position:relative;overflow:hidden}.hero-main:after{content:"";position:absolute;width:240px;height:240px;border-radius:50%;right:-90px;top:-100px;background:#f6d8ce}.hero-main>*{position:relative;z-index:1}.eyebrow{color:var(--accent2);font-size:11px;font-weight:950;text-transform:uppercase;letter-spacing:1.7px}h1{font-size:clamp(34px,5.2vw,62px);line-height:1; margin:12px 0 16px;letter-spacing:-2.8px;color:var(--ink)}.hero p{max-width:720px;color:var(--muted);font-size:16px;line-height:1.7;margin:0}.pipeline{display:flex;gap:8px;flex-wrap:wrap;margin-top:24px}.step{padding:7px 10px;border:1px solid #cfe0d7;border-radius:99px;color:var(--ink);background:#f1f7f3;font-size:11px;font-weight:750}.hero-side{padding:25px;display:flex;flex-direction:column;justify-content:space-between;background:var(--ink);color:#fff;border-color:var(--ink)}.hero-side .eyebrow{color:#a9dfd5}.hero-side .muted{color:#c6d8d2}.health{padding:14px;border-radius:14px;background:#21483f;border:1px solid #37695e}.dot{display:inline-block;width:8px;height:8px;border-radius:50%;background:#65d7ad;margin-right:7px}.dot.bad{background:#ff8d8d}.metrics{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-top:16px}.metric{padding:19px;background:#fff;border:1px solid var(--line);border-radius:18px;box-shadow:0 8px 22px rgba(27,58,48,.05)}.metric small{color:var(--muted)}.metric b{display:block;font-size:30px;margin-top:4px;color:var(--ink)}.panel{padding:22px;margin-top:16px}.panel-head{display:flex;align-items:center;justify-content:space-between;gap:15px;margin-bottom:18px}.panel h2{margin:0;color:var(--ink);font-size:19px}.search{display:grid;grid-template-columns:2fr 1fr 110px 150px;gap:10px}.field label{display:block;color:var(--muted);font-size:11px;font-weight:750;margin:0 0 6px}input,select{width:100%;padding:12px;border-radius:12px;border:1px solid #ccd9d0;background:#fbfdfb;color:var(--text);outline:none}input:focus,select:focus{border-color:var(--accent2);box-shadow:0 0 0 3px rgba(47,143,131,.12)}.options{display:grid;grid-template-columns:150px 140px 1fr;gap:10px;margin-top:10px}.toggle{display:flex;align-items:center;gap:8px;color:var(--muted);font-size:12px;padding-top:23px}.toggle input{width:auto}.field-hint{display:block;color:var(--muted);font-size:10px;margin-top:5px}.actions{display:flex;gap:9px;flex-wrap:wrap;margin-top:12px}.status{margin-top:14px;padding:13px 15px;border:1px solid #d5e2da;border-radius:14px;background:#f4f8f5;color:#486057;line-height:1.55}.status.good{border-color:#bcdacc}.status.bad{border-color:#efc6c6;background:#fff4f4;color:#9d3939}.results{display:grid;gap:12px}.job{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:18px;padding:20px;border:1px solid var(--line);border-radius:18px;background:#fff;box-shadow:0 7px 20px rgba(27,58,48,.045)}.job-top{display:flex;justify-content:space-between;gap:12px}.job-title{font-size:17px;font-weight:900;color:var(--ink)}.company{margin-top:4px;color:var(--muted)}.meta{display:flex;flex-wrap:wrap;gap:7px;margin-top:10px}.tag{font-size:11px;padding:6px 8px;border-radius:8px;background:#f0f5f1;border:1px solid #d7e3da;color:#4d6259}.score{min-width:78px;text-align:center;padding:10px 8px;border-radius:14px;background:#e8f5ef;color:var(--good);font-weight:950;font-size:20px}.job-actions{display:flex;align-items:center;justify-content:flex-end;gap:8px;flex-wrap:wrap;margin-top:14px}.job-links{margin-top:10px;font-size:12px}details{margin-top:12px;border-top:1px solid #e3e9e4;padding-top:10px}summary{cursor:pointer;color:#28776c;font-size:12px;font-weight:750}.reasons{color:var(--muted);line-height:1.65;margin-top:8px}.skills{display:flex;gap:5px;flex-wrap:wrap;margin-top:8px}.skill{font-size:10px;padding:5px 7px;border-radius:99px;border:1px solid #cfe0d7;color:#337267}.history{display:grid;gap:8px}.history-row{display:grid;grid-template-columns:1.4fr .8fr .8fr 2fr;gap:10px;padding:13px;border:1px solid var(--line);border-radius:13px;background:#fbfdfb;font-size:12px}.empty{text-align:center;padding:48px 20px;color:var(--muted);border:1px dashed #c8d8ce;border-radius:14px}.config{display:flex;gap:8px;flex-wrap:wrap}.config-tag{font-size:11px;padding:7px 9px;border:1px solid #cfe0d7;border-radius:99px;color:#42665b;background:#f2f7f3}.resume{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-top:12px;padding:14px;border:1px dashed #c7d8ce;border-radius:14px;background:#fbfdfb}small{color:var(--muted)}@media(max-width:900px){.hero{grid-template-columns:1fr}.metrics{grid-template-columns:repeat(2,1fr)}.search{grid-template-columns:1fr 1fr}.options{grid-template-columns:1fr 1fr}}@media(max-width:600px){.nav{padding:13px 16px}.navnote{display:none}.wrap{padding:18px 13px 50px}.hero-main{padding:25px}h1{letter-spacing:-1.4px}.metrics{grid-template-columns:1fr 1fr}.search{grid-template-columns:1fr}.options{grid-template-columns:1fr}.toggle{padding-top:5px}.job{grid-template-columns:1fr}.job-top{align-items:flex-start}.score{min-width:68px}.job-actions button{width:100%}.history-row{grid-template-columns:1fr}.resume{align-items:flex-start;flex-direction:column}}</style>
 </head>
 <body>
 <header><div class="nav"><div class="logo">Apply<span>Bot</span></div><div class="navnote">Free ATS discovery · local matching · truthful application automation</div></div></header>
@@ -89,8 +14,8 @@ small{color:var(--muted)}
 <section class="hero">
  <div class="hero-main">
   <div class="eyebrow">Job search workspace</div>
-  <h1>Find the right roles.<br>Apply with evidence.</h1>
-  <p>ApplyBot searches its active free ATS dataset inside the app, scores roles against your profile, and only starts application automation when the listing and required information are supported.</p>
+  <h1>Search smarter.<br>Apply when ready.</h1>
+  <p>Fresh opportunities, transparent matching, and a human-in-the-loop application flow. Fresher mode is supported, and verification challenges are handed back to you instead of being bypassed.</p>
   <div class="pipeline"><span class="step">01 Discover</span><span class="step">02 Match</span><span class="step">03 Review</span><span class="step">04 Apply</span><span class="step">05 Record</span></div>
  </div>
  <div class="hero-side">
@@ -112,7 +37,7 @@ small{color:var(--muted)}
   <div class="field"><label>Role or keywords</label><input id="query" value="QA Automation Engineer"></div>
   <div class="field"><label>Location</label><input id="location" value="India"></div>
   <div class="field"><label>Match %</label><input id="threshold" type="number" min="1" max="100" value="65"></div>
-  <div class="field"><label>Max years</label><input id="maxExp" type="number" min="0" step=".5" value="2"></div>
+  <div class="field"><label>Experience ceiling</label><input id="maxExp" type="number" min="0" step=".5" value="2"><span class="field-hint">0 = Fresher / entry-level · undisclosed requirements stay eligible</span></div>
  </div>
  <div class="options">
   <div class="field"><label>Min salary LPA</label><input id="minSalary" type="number" min="0" step=".5" value="3"></div>
@@ -205,11 +130,11 @@ async function loadHistory(){
  const apps=await api('/api/applications');
  $('kApplied').textContent=apps.filter(a=>a.status==='applied').length;
  $('kAction').textContent=apps.filter(a=>['requires_user_action','requires_configuration','failed','unsupported'].includes(a.status)).length;
- $('history').innerHTML=apps.length?apps.map(a=>'<div class="history-row"><div><b>'+esc(a.title)+'</b><br>'+esc(a.company)+'</div><div>'+esc(a.status)+'</div><div>'+esc(a.adapter||'—')+'</div><div>'+esc(a.submission_message||'—')+'</div></div>').join(''):'<div class="empty">No applications yet.</div>';
+ $('history').innerHTML=apps.length?apps.map(a=>{const action=a.status==='requires_user_action'&&a.application_url?'<button class="secondary" onclick="continueVerification('+a.job_id+',\''+String(a.application_url).replace(/'/g,'')+'\')">Continue after verification</button>':'';return '<div class="history-row"><div><b>'+esc(a.title)+'</b><br>'+esc(a.company)+'</div><div>'+esc(a.status)+'</div><div>'+esc(a.adapter||'—')+'</div><div>'+esc(a.submission_message||'—')+' '+action+'</div></div>';}).join(''):'<div class="empty">No applications yet.</div>';
 }
 async function loadAll(){await Promise.all([loadConfig(),loadJobs(),loadHistory()])}
 async function discover(auto){
- const payload={query:val('query')||'QA Automation Engineer',location:val('location')||'India',remote:$('remote').checked,threshold:Number(val('threshold')||65),max_experience:Number(val('maxExp')||2),min_salary:Number(val('minSalary')||3)};
+ const rawExp=val('maxExp'); const payload={query:val('query')||'QA Automation Engineer',location:val('location')||'India',remote:$('remote').checked,threshold:Number(val('threshold')||65),max_experience:rawExp===''?0:Number(rawExp),min_salary:Number(val('minSalary')||3)};
  $('searchBtn').disabled=true;$('autoBtn').disabled=true;
  setStatus('Searching the free ATS dataset and scoring current roles…');
  try{
@@ -231,11 +156,23 @@ async function discover(auto){
  }catch(e){setStatus('Search failed: '+e.message,true)}
  finally{const c=await api('/api/config').catch(()=>({auto_apply_enabled:false}));$('searchBtn').disabled=false;$('autoBtn').disabled=!c.auto_apply_enabled}
 }
+function openEmployer(url){if(!url||url==='#')return;const w=window.open(url,'_blank','noopener,noreferrer');if(!w)setStatus('Your browser blocked the employer tab. Allow pop-ups for ApplyBot.',true)}
+async function continueVerification(id,url){
+ openEmployer(url);
+ setStatus('Employer page opened. Complete the human verification there, then return here and continue the application flow.');
+ try{
+  const x=await api('/api/jobs/'+id+'/continue-after-verification',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({threshold:Number(val('threshold')||65),max_experience:Number(val('maxExp')||2),min_salary:Number(val('minSalary')||3)})});
+  if(x.status==='requires_user_action'&&x.application_url)openEmployer(x.application_url);
+  setStatus(x.message||x.status,x.status==='failed');
+ }catch(e){setStatus('Continue failed: '+e.message,true)}
+ await loadAll();
+}
 async function applyJob(id){
  setStatus('Starting application flow…');
  try{
   const x=await api('/api/jobs/'+id+'/auto-apply',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({threshold:Number(val('threshold')||65),max_experience:Number(val('maxExp')||2),min_salary:Number(val('minSalary')||3)})});
-  setStatus(x.message||x.status);
+  if(x.status==='requires_user_action'&&x.application_url){openEmployer(x.application_url);setStatus('Verification required. The employer page is open in a new tab. Complete the human check, then use Continue after verification.')}
+  else setStatus(x.message||x.status,x.status==='failed');
  }catch(e){setStatus('Application failed: '+e.message,true)}
  await loadAll();
 }
