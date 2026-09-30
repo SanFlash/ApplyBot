@@ -1,0 +1,22 @@
+# Secrets and local configuration
+.env
+.env.*
+!.env.example
+
+# Candidate/private data
+data/resume.pdf
+data/*.pdf
+data/*.doc
+data/*.docx
+data/private/
+uploads/
+
+# Local databases and runtime files
+data/*.db
+data/*.sqlite
+data/*.sqlite3
+*.log
+.pytest_cache/
+__pycache__/
+.venv/
+venv/
