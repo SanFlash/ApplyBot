@@ -1610,7 +1610,12 @@ def _fill_label(page, patterns, value):
 
 
 def resolve_application_url(job_url):
-    """Resolve a public job-detail page to its employer/ATS application URL."""
+    """Resolve a public listing to an employer/ATS URL, using HTTP first.
+
+    Browser rendering is only a fallback. This keeps link resolution working on
+    Render even when a browser is temporarily unavailable and avoids launching
+    Chromium for ordinary server-rendered job pages.
+    """
     if not job_url:
         return job_url, None
     host = (urlparse(job_url).hostname or "").lower()
@@ -1620,31 +1625,77 @@ def resolve_application_url(job_url):
     )
     if any(x in host for x in supported_hosts):
         return job_url, None
+
+    def pick_link(html):
+        from html import unescape
+        candidates = re.findall(
+            r'<a[^>]+href=["\\\']([^"\\\']+)["\\\'][^>]*>(.*?)</a>',
+            html or "", re.I | re.S
+        )
+        for href, label_html in candidates[:500]:
+            href = unescape(href).strip()
+            label = strip_html(unescape(label_html)).strip().lower()
+            if href.startswith("//"):
+                href = "https:" + href
+            if href.startswith("/"):
+                from urllib.parse import urljoin
+                href = urljoin(job_url, href)
+            if not href.startswith("http") or href == job_url:
+                continue
+            h2 = (urlparse(href).hostname or "").lower()
+            if any(x in h2 for x in supported_hosts):
+                return href
+            if re.search(r"\\b(apply|application|apply now|submit application)\\b", label, re.I) and h2:
+                return href
+        return None
+
+    # Fast, dependency-free resolution path.
+    try:
+        req = urllib.request.Request(
+            job_url,
+            headers={"User-Agent": "Mozilla/5.0 ApplyBot/5.1", "Accept": "text/html,*/*"},
+        )
+        with urllib.request.urlopen(req, timeout=15) as response:
+            html = response.read(2_000_000).decode("utf-8", errors="ignore")
+        resolved = pick_link(html)
+        if resolved:
+            return resolved, "Resolved employer application URL without browser"
+    except Exception:
+        pass
+
+    # Dynamic-page fallback.
     try:
         from playwright.sync_api import sync_playwright
         with sync_playwright() as p:
-            browser = p.chromium.launch(headless=True)
+            browser = p.chromium.launch(
+                headless=True,
+                args=["--no-sandbox", "--disable-dev-shm-usage"],
+            )
             page = browser.new_page()
             page.goto(job_url, wait_until="domcontentloaded", timeout=30000)
-            page.wait_for_timeout(800)
+            page.wait_for_timeout(700)
             links = page.locator("a[href]")
-            for i in range(min(links.count(), 250)):
+            for i in range(min(links.count(), 300)):
                 a = links.nth(i)
                 try:
                     href = a.get_attribute("href") or ""
                     label = (a.inner_text() or "").strip().lower()
-                    host2 = (urlparse(href).hostname or "").lower()
+                    if href.startswith("/"):
+                        from urllib.parse import urljoin
+                        href = urljoin(job_url, href)
+                    h2 = (urlparse(href).hostname or "").lower()
                     if not href.startswith("http") or href == job_url:
                         continue
-                    if re.search(r"\\b(apply|application|apply now|submit application|careers)\\b", label, re.I):
-                        if host2 and host2 != host:
-                            browser.close()
-                            return href, "Resolved employer application URL"
+                    if any(x in h2 for x in supported_hosts) or re.search(
+                        r"\\b(apply|application|apply now|submit application)\\b", label, re.I
+                    ):
+                        browser.close()
+                        return href, "Resolved employer application URL"
                 except Exception:
                     continue
             browser.close()
     except Exception as exc:
-        return job_url, "Application-link resolution failed: " + str(exc)[:400]
+        return job_url, "Application-link resolution unavailable: " + str(exc)[:300]
     return job_url, "No supported employer application URL found on the listing"
 
 
