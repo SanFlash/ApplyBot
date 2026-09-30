@@ -15,6 +15,7 @@ import os
 import re
 import time
 import urllib.request
+import urllib.parse
 
 FREE_DATASET_URL = os.getenv(
     "FREE_JOB_DATASET_URL",
@@ -414,6 +415,105 @@ def _fetch_live_remote(query):
     return _dedupe(results), errors
 
 
+
+def _normalize_hopin(raw, source_name="Hopin Live"):
+    if not isinstance(raw, dict):
+        return None
+    title = str(raw.get("title") or "").strip()
+    company = str(raw.get("company") or "Unknown").strip()
+    location = str(raw.get("location") or "").strip()
+    if not title or not location:
+        return None
+    description = str(raw.get("description") or "").strip()
+    ctc = str(raw.get("ctc_amount") or "").strip()
+    text = " ".join((title, description, ctc))
+    return {
+        "external_id": "hopin:" + str(raw.get("id") or (company + "|" + title + "|" + location)),
+        "source": source_name,
+        "source_url": str(raw.get("url") or raw.get("application_url") or "https://hopinjobs.com").strip(),
+        "title": title,
+        "company": company,
+        "location": location,
+        "work_mode": str(raw.get("work_type") or ""),
+        "salary_min": None,
+        "salary_max": None,
+        "experience_min": 0.0 if any(x in text.lower() for x in ("fresher", "entry level", "entry-level", "graduate", "0-2", "0 - 2")) else None,
+        "url": str(raw.get("url") or raw.get("application_url") or "https://hopinjobs.com").strip(),
+        "description": (description + " " + ctc).strip() or title,
+        "employment_type": str(raw.get("job_type") or ""),
+        "posted_at": str(raw.get("posted_at") or ""),
+        "is_remote": "remote" in (location + " " + str(raw.get("work_type") or "")).lower(),
+    }
+
+
+def _hopin_filter_value(location):
+    wanted = (location or "").strip().lower()
+    if not wanted:
+        return None
+    try:
+        req = urllib.request.Request(
+            "https://api.hopinjobs.com/api/filters",
+            headers={"User-Agent": "ApplyBot/6.0 (+live India job discovery)", "Accept": "application/json"},
+        )
+        with urllib.request.urlopen(req, timeout=12) as response:
+            payload = json.loads(response.read().decode("utf-8"))
+        values = ((payload.get("filters") or {}).get("location") or []) if isinstance(payload, dict) else []
+        candidates = []
+        for item in values:
+            if isinstance(item, dict):
+                value = str(item.get("filter_value") or "")
+                label = str(item.get("display_label") or value)
+            else:
+                value = label = str(item)
+            if not value:
+                continue
+            low = (value + " " + label).lower()
+            if wanted == value.lower() or wanted == label.lower():
+                return value
+            if wanted in low:
+                candidates.append(value)
+        return candidates[0] if candidates else None
+    except Exception:
+        return None
+
+
+def _fetch_live_hopin(query, location, remote):
+    results, errors = [], []
+    requested = (location or "").strip()
+    filter_value = _hopin_filter_value(requested)
+    base = "https://api.hopinjobs.com/api/jobs"
+    params = {"is_unofficial": "true"}
+    if filter_value and requested.lower() not in {"remote", "anywhere", "worldwide", "global"}:
+        params["location"] = filter_value
+    if remote or requested.lower() in {"remote", "anywhere", "worldwide", "global"}:
+        params["work_type"] = "Remote"
+
+    for endpoint_name, path in (("Hopin jobs", "/api/jobs"), ("Hopin internships", "/api/internships")):
+        try:
+            query_params = dict(params)
+            url = "https://api.hopinjobs.com" + path + "?" + urllib.parse.urlencode(query_params)
+            req = urllib.request.Request(
+                url,
+                headers={"User-Agent": "ApplyBot/6.0 (+live India job discovery)", "Accept": "application/json"},
+            )
+            with urllib.request.urlopen(req, timeout=15) as response:
+                payload = json.loads(response.read().decode("utf-8"))
+            key = "jobs" if path.endswith("/jobs") else "internships"
+            rows = payload.get(key, []) if isinstance(payload, dict) else []
+            for raw in rows:
+                job = _normalize_hopin(raw, endpoint_name)
+                if not job:
+                    continue
+                if _live_job_matches(job, query) and _live_location_matches(job, requested, remote):
+                    job["_query"] = query
+                    results.append(job)
+        except Exception as exc:
+            errors.append(endpoint_name + ": " + str(exc)[:500])
+
+    return _dedupe(results), errors, filter_value
+
+
+
 def _dataset_status(selected, raw_count):
     return {
         "source": "Free ATS Dataset",
@@ -425,31 +525,44 @@ def _dataset_status(selected, raw_count):
 
 
 def search_public_sources(query, location="", remote=False):
-    """Search fresh public feeds first, then use the daily ATS dataset as recall fallback.
+    """Search live location-aware feeds first, then use the ATS snapshot as fallback.
 
-    The previous implementation returned only the daily GitHub snapshot. This
-    version combines live location-aware listings with that snapshot, dedupes
-    them, and never claims the snapshot is the complete market.
+    Live sources are intentionally additive: if a live provider is temporarily
+    unavailable, the daily ATS dataset still gives the user useful results.
     """
     query = (query or "").strip() or "QA Automation Engineer"
     location = (location or "").strip() or "India"
     results, errors, status = [], [], []
 
-    # 1) Live location-aware public feed.
-    live, live_errors = _fetch_live_arbeitnow(query, location, remote)
-    results.extend(live)
-    errors.extend({"source": "Arbeitnow", "error": e} for e in live_errors)
+    # India-first live source with server-side city/location filtering.
+    hopin, hopin_errors, hopin_filter = _fetch_live_hopin(query, location, remote)
+    results.extend(hopin)
+    errors.extend({"source": "Hopin", "error": e} for e in hopin_errors)
+    status.append({
+        "source": "Hopin Live",
+        "found": len(hopin),
+        "raw_found": len(hopin),
+        "configured": True,
+        "provider": "Public live India jobs + internships API",
+        "location_filter": hopin_filter or "local text matching",
+        "fresh": True,
+    })
+
+    # Additional live public feed. This is especially useful for international
+    # locations, while the Hopin feed is strongest for Indian fresher roles.
+    arbeit, arbeit_errors = _fetch_live_arbeitnow(query, location, remote)
+    results.extend(arbeit)
+    errors.extend({"source": "Arbeitnow", "error": e} for e in arbeit_errors)
     status.append({
         "source": "Arbeitnow Live",
-        "found": len(live),
-        "raw_found": len(live),
+        "found": len(arbeit),
+        "raw_found": len(arbeit),
         "configured": True,
         "provider": "Public live job-board API",
         "location_search": location,
         "fresh": True,
     })
 
-    # 2) Remote-only live feeds when the user asks for remote.
     if remote or location.lower() in {"remote", "anywhere", "worldwide", "global"}:
         remote_jobs, remote_errors = _fetch_live_remote(query)
         results.extend(remote_jobs)
@@ -463,7 +576,7 @@ def search_public_sources(query, location="", remote=False):
             "fresh": True,
         })
 
-    # 3) Daily normalized ATS dataset remains the free fallback for recall.
+    # Daily normalized ATS data is retained as a fallback/backfill.
     if FREE_DATASET_ENABLED:
         try:
             raw, stale_note = _fetch_dataset()
@@ -482,4 +595,4 @@ def search_public_sources(query, location="", remote=False):
             status.append(_dataset_status([], 0))
 
     final = _dedupe(results)
-    return final[:800], errors, status
+    return final[:1000], errors, status
