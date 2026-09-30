@@ -1874,11 +1874,12 @@ def auto_apply_job(job_id, threshold=70, max_experience=2, min_salary=3):
     now = utcnow()
     c = db()
     c.execute(
-        """INSERT INTO applications(job_id,tailored_summary,cover_letter,answers_json,status,created_at,updated_at,adapter,submission_id,submission_message,submitted_at)
-        VALUES(?,?,?,?,?,?,?,?,?,?,?)""",
+        """INSERT INTO applications(job_id,tailored_summary,cover_letter,answers_json,status,created_at,updated_at,adapter,submission_id,submission_message,submitted_at,application_url)
+        VALUES(?,?,?,?,?,?,?,?,?,?,?,?)""",
         (job_id, job["title"], make_answers(job).get("why_interested", ""), json.dumps(make_answers(job)),
          "applied" if status == "submitted" else status, now, now, result.get("adapter"),
-         result.get("submission_id"), result.get("message"), now if status == "submitted" else None)
+         result.get("submission_id"), result.get("message"), now if status == "submitted" else None,
+         result.get("application_url") or job.get("url"))
     )
     if status == "submitted":
         c.execute("UPDATE jobs SET status=? WHERE id=?", ("applied", job_id))
@@ -1918,9 +1919,9 @@ def prepare_application(job_id):
     now = utcnow()
     cover = answers.get("why_interested", "")
     c.execute(
-        """INSERT INTO applications(job_id,tailored_summary,cover_letter,answers_json,status,created_at,updated_at,adapter,submission_id,submission_message,submitted_at)
-        VALUES(?,?,?,?,?,?,?,?,?,?,?)""",
-        (job_id, job["title"], cover, json.dumps(answers), "application_ready", now, now, detect_application_adapter(job["url"]), None, "Application prepared; not submitted.", None)
+        """INSERT INTO applications(job_id,tailored_summary,cover_letter,answers_json,status,created_at,updated_at,adapter,submission_id,submission_message,submitted_at,application_url)
+        VALUES(?,?,?,?,?,?,?,?,?,?,?,?)""",
+        (job_id, job["title"], cover, json.dumps(answers), "application_ready", now, now, detect_application_adapter(job["url"]), None, "Application prepared; not submitted.", None, job.get("url"))
     )
     c.commit()
     app_row = c.execute("SELECT id FROM applications WHERE job_id=? ORDER BY id DESC LIMIT 1", (job_id,)).fetchone()
