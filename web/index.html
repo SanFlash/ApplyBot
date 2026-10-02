@@ -13,7 +13,7 @@
 <main class="wrap">
 <section class="hero">
  <div class="hero-main">
-  <div class="eyebrow">Job search workspace</div>
+  <div class="eyebrow">Job search workspace · Resume-aware autofill</div>
   <h1>Search smarter.<br>Apply when ready.</h1>
   <p>Fresh opportunities, transparent matching, and a human-in-the-loop application flow. Fresher mode is supported, and verification challenges are handed back to you instead of being bypassed.</p>
   <div class="pipeline"><span class="step">01 Discover</span><span class="step">02 Match</span><span class="step">03 Review</span><span class="step">04 Apply</span><span class="step">05 Record</span></div>
@@ -54,6 +54,7 @@
   <div class="profile-item"><b>Candidate</b><small id="profileName">Loading profile…</small></div>
   <div class="profile-item"><b>Core stack</b><small id="profileStack">Playwright · JS/TS · Appium · Python · SQL</small></div>
   <div class="profile-item"><b>Target</b><small id="profileTarget">QA Engineer · QA Automation · SDET · ₹4–5 LPA</small></div>
+  <div class="profile-item"><b>Autofill</b><small id="profileAutofill">Resume fields mapped automatically; ambiguous questions stay for review.</small></div>
  </div>
  <div class="config" id="config" style="margin-top:12px"></div>
 </section>
@@ -91,18 +92,20 @@ async function uploadResume(){
 }
 async function loadConfig(){
  try{
-  const [c,p,profile]=await Promise.all([api('/api/config'),api('/api/provider-check'),api('/api/profile')]);
+  const [c,p,profile,r]=await Promise.all([api('/api/config'),api('/api/provider-check'),api('/api/profile'),api('/api/resume/status')]);
   $('profileName').textContent=profile.name||'Candidate profile';
   $('profileStack').textContent=(profile.skills||[]).slice(0,8).join(' · ');
   $('profileTarget').textContent=(profile.roles_primary||[]).slice(0,3).join(' · ')+' · ₹'+profile.expected_ctc_min_lpa+'–'+profile.expected_ctc_max_lpa+' LPA';
-  $('resumeState').textContent=c.resume_configured?'PDF resume configured':'Upload a PDF resume before applying';
+  $('resumeState').textContent=r.configured ? ('PDF ready · '+(r.persistent?'persistently stored':'configured locally')+' · '+Number(r.size_bytes||0).toLocaleString()+' bytes') : 'Upload a PDF resume before applying';
   $('health').innerHTML='<span class="dot '+(p.ok?'':'bad')+'"></span>'+(p.ok?'Discovery source online · '+Number(p.source.count).toLocaleString()+' jobs available':'Discovery source check failed');
   $('config').innerHTML=[
    'Live location search',
    'Free-first sources',
    'No RSS',
    (c.auto_apply_enabled?'Auto-apply enabled':'Auto-apply disabled'),
-   'ATS: '+(c.supported_browser_adapters||[]).join(', ')
+   'ATS: '+(c.supported_browser_adapters||[]).join(', '),
+   'Resume-aware autofill',
+   r.configured ? 'Persistent resume storage ready' : 'Resume upload required'
   ].map(x=>'<span class="config-tag">'+esc(x)+'</span>').join('');
   $('autoBtn').disabled=!c.auto_apply_enabled;
  }catch(e){
