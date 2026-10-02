@@ -122,6 +122,19 @@ ApplyBot does **not** bypass CAPTCHA, authentication, anti-bot systems or access
 
 A job is never marked `applied` merely because an application was prepared.
 
+## Resume-driven application autofill
+
+ApplyBot can now persist the uploaded PDF resume in the configured database and use it during supported ATS applications. The application flow:
+
+1. Upload the PDF from the ApplyBot UI.
+2. Store the resume persistently in PostgreSQL/SQLite; the public GitHub repository never contains the private PDF.
+3. Attach the same resume to supported ATS file-upload controls.
+4. Map resume-backed candidate data to common employer fields using labels, accessible names, placeholders, names/IDs, selects, radio/checkbox controls and common application questions.
+5. Leave ambiguous or unsupported questions unanswered instead of inventing candidate information.
+6. Stop for CAPTCHA/human verification or unresolved required fields and hand control back to the user.
+
+The resume profile is aligned to the uploaded Satyendra Kumar Namdeo QA resume, including QA Engineer/QA Automation/SDET targeting, Playwright, JavaScript/TypeScript, Appium, API/database validation, AI-assisted QA, 45-day notice period and ₹4–5 LPA expected range.
+
 ## Configuration
 
 Required for production:
