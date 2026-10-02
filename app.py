@@ -2050,6 +2050,7 @@ def submit_with_browser(job, answers):
                 r"\b(captcha|verify you are human|cloudflare challenge)\b", body_text, re.I
             ):
                 browser.close()
+                cleanup_resume_file(cleanup_resume)
                 return {
                     "status": "requires_user_action",
                     "adapter": adapter,
@@ -2100,6 +2101,7 @@ def submit_with_browser(job, answers):
                 submit = page.locator('input[type="submit"], button[type="submit"]').last
             if not submit.count() or not submit.is_visible():
                 browser.close()
+                cleanup_resume_file(cleanup_resume)
                 return {"status": "requires_user_action", "adapter": adapter,
                         "message": "No unambiguous submit control was found."}
 
