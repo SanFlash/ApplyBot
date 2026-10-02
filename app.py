@@ -5,12 +5,15 @@ import json
 import os
 import re
 import sqlite3
+import tempfile
 import urllib.request
 from datetime import datetime, timezone
 from pathlib import Path
 from urllib.parse import urlparse
 
 from flask import Flask, jsonify, request, send_from_directory
+
+from resume_form import build_resume_answers, answer_for_descriptor, option_match
 
 BASE = Path(__file__).resolve().parent
 DATA = BASE / "data"
@@ -254,6 +257,25 @@ def init_db():
         c.execute(statement)
 
     ensure_schema_columns(c)
+
+    if c.pg:
+        c.execute("""CREATE TABLE IF NOT EXISTS resume_assets (
+          id BIGSERIAL PRIMARY KEY,
+          filename TEXT NOT NULL,
+          mime_type TEXT NOT NULL,
+          content BYTEA NOT NULL,
+          sha256 TEXT NOT NULL,
+          uploaded_at TEXT NOT NULL
+        )""")
+    else:
+        c.execute("""CREATE TABLE IF NOT EXISTS resume_assets (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          filename TEXT NOT NULL,
+          mime_type TEXT NOT NULL,
+          content BLOB NOT NULL,
+          sha256 TEXT NOT NULL,
+          uploaded_at TEXT NOT NULL
+        )""")
 
     candidate_json = json.dumps(CANDIDATE)
     if c.pg:
@@ -1525,6 +1547,36 @@ def discover():
         return jsonify({"error": "Discovery failed", "details": str(exc)[:1500]}), 502
 
 
+def get_stored_resume():
+    c = db()
+    row = c.execute("SELECT * FROM resume_assets ORDER BY id DESC LIMIT 1").fetchone()
+    c.close()
+    return dict(row) if row else None
+
+
+def materialize_resume_for_browser():
+    configured = RESUME_PATH.strip()
+    if configured:
+        path = Path(configured)
+        if path.is_file():
+            return str(path), None
+    stored = get_stored_resume()
+    if not stored:
+        return None, None
+    fd, path = tempfile.mkstemp(prefix="applybot-resume-", suffix=".pdf")
+    os.close(fd)
+    Path(path).write_bytes(stored["content"])
+    return path, path
+
+
+def cleanup_resume_file(path):
+    if path:
+        try:
+            Path(path).unlink(missing_ok=True)
+        except Exception:
+            pass
+
+
 @app.post("/api/resume")
 def upload_resume():
     uploaded = request.files.get("resume")
@@ -1532,9 +1584,47 @@ def upload_resume():
         return jsonify({"error": "Resume file is required"}), 400
     if not uploaded.filename.lower().endswith(".pdf"):
         return jsonify({"error": "Only PDF resumes are accepted"}), 400
-    target = DATA / "resume.pdf"
-    uploaded.save(target)
-    return jsonify({"ok": True, "message": "Resume uploaded for this ApplyBot instance."})
+    content = uploaded.read()
+    if not content:
+        return jsonify({"error": "The uploaded PDF is empty."}), 400
+    if len(content) > 5 * 1024 * 1024:
+        return jsonify({"error": "Resume PDF must be 5 MB or smaller."}), 400
+    digest = hashlib.sha256(content).hexdigest()
+    now = utcnow()
+    c = db()
+    c.execute("DELETE FROM resume_assets")
+    c.execute(
+        "INSERT INTO resume_assets(filename,mime_type,content,sha256,uploaded_at) VALUES(?,?,?,?,?)",
+        (Path(uploaded.filename).name, "application/pdf", content, digest, now),
+    )
+    c.commit()
+    c.close()
+    try:
+        (DATA / "resume.pdf").write_bytes(content)
+    except Exception:
+        pass
+    return jsonify({
+        "ok": True,
+        "message": "Resume uploaded and stored persistently. ApplyBot will attach this PDF and use the resume profile to fill matching fields.",
+        "filename": Path(uploaded.filename).name,
+        "sha256": digest,
+        "size_bytes": len(content),
+    })
+
+
+@app.get("/api/resume/status")
+def resume_status():
+    stored = get_stored_resume()
+    configured = bool(RESUME_PATH and Path(RESUME_PATH).is_file())
+    active = stored or ({"filename": Path(RESUME_PATH).name, "sha256": None, "size_bytes": Path(RESUME_PATH).stat().st_size} if configured else None)
+    return jsonify({
+        "configured": bool(active),
+        "persistent": bool(stored),
+        "filename": active.get("filename") if active else None,
+        "sha256": active.get("sha256") if active else None,
+        "size_bytes": len(active.get("content", b"")) if stored else (active.get("size_bytes") if active else 0),
+        "uploaded_at": active.get("uploaded_at") if stored else None,
+    })
 
 
 @app.get("/api/discovery-diagnostics")
@@ -1601,7 +1691,7 @@ def config_status():
         "auto_apply_max": AUTO_APPLY_MAX,
         "candidate_email_configured": bool(CANDIDATE_EMAIL),
         "candidate_phone_configured": bool(CANDIDATE_PHONE),
-        "resume_configured": resume_file_path().is_file(),
+        "resume_configured": bool(get_stored_resume() or (RESUME_PATH and resume_file_path().is_file())),
         "supported_browser_adapters": ["greenhouse", "lever", "workable", "ashby", "smartrecruiters"],
         "discovery": {
             "provider": "ConorsCode/open-jobs-data",
@@ -1704,6 +1794,94 @@ def _fill_label(page, patterns, value):
     return False
 
 
+def _field_descriptor(page, loc):
+    try:
+        return str(loc.evaluate("""e => {
+            const parts = [
+                e.getAttribute('aria-label'),
+                e.getAttribute('placeholder'),
+                e.getAttribute('name'),
+                e.getAttribute('id'),
+                e.getAttribute('autocomplete')
+            ].filter(Boolean);
+            if (e.id) {
+                const label = document.querySelector('label[for="' + CSS.escape(e.id) + '"]');
+                if (label) parts.push(label.innerText);
+            }
+            const parent = e.closest('label,fieldset');
+            if (parent) parts.push(parent.innerText);
+            return parts.join(' | ');
+        }""") or "")
+    except Exception:
+        return ""
+
+
+def _fill_resume_mapped_fields(page, answers):
+    filled = []
+    controls = page.locator('input:not([type="hidden"]):not([type="file"]), textarea, select')
+    for i in range(min(controls.count(), 250)):
+        loc = controls.nth(i)
+        try:
+            if not loc.is_visible():
+                continue
+            descriptor = _field_descriptor(page, loc)
+            key, value = answer_for_descriptor(descriptor, answers)
+            if not key or not value:
+                continue
+            tag = str(loc.evaluate("e => e.tagName.toLowerCase()"))
+            kind = str(loc.get_attribute("type") or "").lower()
+            if tag == "select":
+                labels = loc.locator("option").evaluate_all("(els) => els.map(e => e.textContent.trim()).filter(Boolean)")
+                match = option_match(labels, value)
+                if match:
+                    loc.select_option(label=match)
+                    filled.append(key)
+                continue
+            if kind in {"radio", "checkbox"}:
+                desired = value.strip().lower()
+                descriptor_lower = descriptor.lower()
+                if desired in {"yes", "no"} and desired in descriptor_lower and not loc.is_checked():
+                    loc.check()
+                    filled.append(key)
+                continue
+            try:
+                current = loc.input_value().strip()
+            except Exception:
+                current = ""
+            if current:
+                continue
+            loc.fill(value)
+            filled.append(key)
+        except Exception:
+            continue
+    return sorted(set(filled))
+
+
+def _required_fields_remaining(page):
+    missing = []
+    required = page.locator("input[required], textarea[required], select[required]")
+    for i in range(min(required.count(), 250)):
+        el = required.nth(i)
+        try:
+            if not el.is_visible():
+                continue
+            tag = str(el.evaluate("e => e.tagName.toLowerCase()"))
+            kind = str(el.get_attribute("type") or "").lower()
+            if kind in {"radio", "checkbox"}:
+                name = el.get_attribute("name") or ""
+                group = page.locator(f'input[name="{name}"]') if name else el
+                if not any(group.nth(j).is_checked() for j in range(min(group.count(), 20))):
+                    missing.append(_field_descriptor(page, el) or kind)
+            elif tag == "select":
+                if not el.input_value().strip():
+                    missing.append(_field_descriptor(page, el) or "select")
+            elif not el.input_value().strip():
+                missing.append(_field_descriptor(page, el) or tag)
+        except Exception:
+            continue
+    return missing
+
+
 def resolve_application_url(job_url):
     """Resolve a public listing to an employer/ATS URL, using HTTP first.
 
@@ -1799,6 +1977,7 @@ def resolve_jobicy_application_url(job_url):
     return resolve_application_url(job_url)
 
 def submit_with_browser(job, answers):
+    answers = build_resume_answers(CANDIDATE, job, answers)
     application_url = job["url"]
     resolution_message = None
     adapter = detect_application_adapter(application_url)
@@ -1829,10 +2008,11 @@ def submit_with_browser(job, answers):
         }
     if not CANDIDATE_EMAIL or not CANDIDATE_PHONE:
         return {"status": "requires_configuration", "adapter": adapter,
-                "message": "Configure CANDIDATE_EMAIL, CANDIDATE_PHONE and RESUME_PATH."}
-    if not resume_file_path().is_file():
+                "message": "Configure CANDIDATE_EMAIL and CANDIDATE_PHONE."}
+    resume_path, cleanup_resume = materialize_resume_for_browser()
+    if not resume_path:
         return {"status": "requires_configuration", "adapter": adapter,
-                "message": "Configured resume file does not exist."}
+                "message": "Upload a PDF resume in ApplyBot before applying."}
 
     try:
         from playwright.sync_api import sync_playwright
@@ -1877,15 +2057,15 @@ def submit_with_browser(job, answers):
                     "message": "Human verification/CAPTCHA detected. The employer page is ready for you to complete verification; ApplyBot will not bypass it. After verification, return to ApplyBot and choose Continue after verification.",
                 }
 
+            files = page.locator('input[type="file"]')
+            if files.count():
+                files.first.set_input_files(str(resume_path))
+
             first, last = CANDIDATE["name"].split(" ", 1)[0], CANDIDATE["name"].split(" ")[-1]
             _fill_first(page, ['input[name*="first" i]', 'input[id*="first" i]'], first)
             _fill_first(page, ['input[name*="last" i]', 'input[id*="last" i]'], last)
             _fill_first(page, ['input[type="email"]', 'input[name*="email" i]'], CANDIDATE_EMAIL)
             _fill_first(page, ['input[type="tel"]', 'input[name*="phone" i]', 'input[id*="phone" i]'], CANDIDATE_PHONE)
-
-            files = page.locator('input[type="file"]')
-            if files.count():
-                files.first.set_input_files(str(resume_file_path()))
 
             cover = answers.get("cover_letter", "")
             _fill_label(page, [r"cover letter", r"additional information", r"message"], cover)
@@ -1902,19 +2082,18 @@ def submit_with_browser(job, answers):
             ]:
                 _fill_label(page, patterns, value)
 
-            required = page.locator("input[required], textarea[required], select[required]")
-            missing = []
-            for i in range(required.count()):
-                el = required.nth(i)
-                try:
-                    if el.is_visible() and not el.input_value():
-                        missing.append(el.evaluate("(e) => e.tagName.toLowerCase()"))
-                except Exception:
-                    pass
+            filled_fields = _fill_resume_mapped_fields(page, answers)
+            missing = _required_fields_remaining(page)
             if missing:
                 browser.close()
-                return {"status": "requires_user_action", "adapter": adapter,
-                        "message": f"{len(missing)} required field(s) remain unanswered; ApplyBot will not guess."}
+                cleanup_resume_file(cleanup_resume)
+                return {
+                    "status": "requires_user_action",
+                    "adapter": adapter,
+                    "application_url": page.url or job["url"],
+                    "message": f"{len(missing)} required field(s) remain unanswered. Review these fields before submitting: " + "; ".join(missing[:8]),
+                    "filled_fields": filled_fields,
+                }
 
             submit = page.get_by_role("button", name=re.compile(r"submit application|submit|apply", re.I)).last
             if not submit.count():
@@ -1928,12 +2107,14 @@ def submit_with_browser(job, answers):
             page.wait_for_timeout(2500)
             confirmation = page.locator("body").inner_text(timeout=10000)
             browser.close()
+            cleanup_resume_file(cleanup_resume)
             if re.search(r"(application.*(submitted|received)|thank you.*apply|successfully applied)", confirmation, re.I):
                 return {"status": "submitted", "adapter": adapter,
                         "message": "Application submitted and confirmation text was detected."}
             return {"status": "submitted", "adapter": adapter,
                     "message": "Submit action completed; no standard confirmation phrase was detected."}
     except Exception as exc:
+        cleanup_resume_file(locals().get("cleanup_resume"))
         return {"status": "failed", "adapter": adapter, "message": str(exc)[:1000]}
 
 
